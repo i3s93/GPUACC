@@ -42,6 +42,9 @@ M = parsed_args["M"]
 N = parsed_args["N"]
 s = parsed_args["s"]
 
+# Get the number of BLAS threads being used
+println("Number of BLAS threads:", BLAS.get_num_threads())
+
 # Set the number of samples
 BenchmarkTools.DEFAULT_PARAMETERS.samples = s
 
@@ -50,21 +53,9 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = s
 # Alternatively, we could have used interpolation here.
 const A = randn(Float64, (L, M))
 const B = randn(Float64, (M, N))
-C = Array{Float64}(undef, (L, N))
 
-alpha = 1.0
-beta = 1.0
-
-# Perform matrix multiplication A*B with GEMM in BLAS
-# Here 'N' means that we should not transpose the input, and "!" indicates
-# that the input C will be modified
-#benchmark_data = @benchmark LinearAlgebra.BLAS.gemm!('N', 'N', alpha, A, B, beta, C)
-
-# Can also just use the "times" operator
-benchmark_data = @benchmark C = A*B
-
-# Can inspect the output of the benchmark to see fields
-#dump(benchmark_data)
+# Can just use the "times" operator
+benchmark_data = @benchmark A*B
 
 # Times are in nano-seconds (ns) which are converted to seconds
 sample_times = benchmark_data.times

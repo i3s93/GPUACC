@@ -1,26 +1,26 @@
-# This script tests a CPU SVD factorization.
+# This script tests a GPU SVD factorization.
 # It benchmarks the factorization A = USV', where A is an M x N matrix
 
 using ArgParse
 using BenchmarkTools
-using LinearAlgebra
+using CUDA
 
 # Retrieve the command line arguments
 s = ArgParseSettings()
 
 @add_arg_table s begin
     "-M", "--M"
-        help = "Number of columns in A and rows of B";
+        help = "Number of rows in A";
         arg_type = Int
         default = 256
     "-N", "--N"
-        help = "Number of columns of B";
+        help = "Number of columns in A";
         arg_type = Int
         default = 256
     "-s", "--s"
         help = "Number of samples to use for statistics"
         arg_type = Int
-        default = 1000
+        default = 10
 end
 
 # Parse the arguments and print them to the command line
@@ -42,10 +42,10 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = s
 # Setup the matrices for the operation
 # We declare these as "cost" so they are not treated as globals
 # Alternatively, we could have used interpolation here.
-const A = randn(Float64, (M, N))
+const A = CUDA.randn(Float64, (M, N))
 
 # Perform the QR factorization A = USV'
-benchmark_data = @benchmark svd(A)
+benchmark_data = @benchmark CUDA.@sync svd(A)
 
 # Times are in nano-seconds (ns) which are converted to seconds
 sample_times = benchmark_data.times
