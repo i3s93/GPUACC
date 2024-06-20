@@ -2,6 +2,7 @@
 # It benchmarks the factorization A = QR, where A is an M x N matrix
 
 using ArgParse
+using Printf
 using BenchmarkTools
 using LinearAlgebra
 
@@ -20,13 +21,13 @@ s = ArgParseSettings()
     "-s", "--s"
         help = "Number of samples to use for statistics"
         arg_type = Int
-        default = 1000
+        default = 10
 end
 
 # Parse the arguments and print them to the command line
 parsed_args = parse_args(s)
 
-println("Options used:")
+println("Options used for QR (CPU):")
 for (arg,val) in parsed_args
     println("  $arg  =  $val")
 end
@@ -36,8 +37,10 @@ M = parsed_args["M"]
 N = parsed_args["N"]
 s = parsed_args["s"]
 
-# Set the number of samples
+# Reset defaults for the number of samples and total time for
+# the benchmarking process
 BenchmarkTools.DEFAULT_PARAMETERS.samples = s
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
 # Setup the matrices for the operation
 # We declare these as "cost" so they are not treated as globals
@@ -51,11 +54,10 @@ benchmark_data = @benchmark qr(A)
 sample_times = benchmark_data.times
 sample_times /= 10^9
 
-println("\n")
-println("Minimum (s): ", minimum(sample_times))
-println("Maximum (s): ", maximum(sample_times))
-println("Median (s): ", median(sample_times))
-println("Mean (s): ", mean(sample_times))
-println("Standard Deviation (s): ", std(sample_times))
-
+@printf "CPU results:\n"
+@printf "Minimum (s): %.8e\n" minimum(sample_times)
+@printf "Maximum (s): %.8e\n" maximum(sample_times)
+@printf "Median (s): %.8e\n" median(sample_times)
+@printf "Mean (s): %.8e\n" mean(sample_times)
+@printf "Standard deviation (s): %.8e\n" std(sample_times)
 
