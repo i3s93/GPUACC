@@ -1,5 +1,16 @@
 # This script tests a CPU implementation of a Sylvester solver
 
+import Base: find_package
+
+# Check if MKL is available. If so, use it.
+if find_package("MKL") !== nothing
+	println("Intel MKL installation found.")
+	using MKL
+else
+	println("Intel MKL installation not found.")
+	println("Running with the default installation.")
+end
+
 using ArgParse
 using Printf
 using BenchmarkTools
@@ -23,23 +34,23 @@ end
 settings = ArgParseSettings()
 
 @add_arg_table settings begin
-    "--Lx", "-Lx"
+    "--Lx"
         help = "Domain length along x";
         arg_type = Float64
         default = 1.0
-    "--Ly", "-Ly"
+    "--Ly"
         help = "Domain length along y";
         arg_type = Float64
         default = 1.0
-    "--Nx", "-Nx"
+    "--Nx"
         help = "Number grid points in x";
         arg_type = Int
         default = 101
-    "--Ny", "-Ny"
+    "--Ny"
         help = "Number grid points in y";
         arg_type = Int
         default = 101
-    "--rel_eps", "-rel_eps"
+    "--rel_eps"
         help = "Relative truncation tolerance for SVD truncation"
         arg_type = Float64
         default = 1.0e-3
@@ -60,8 +71,9 @@ Nx = parsed_args["Nx"]
 Ny = parsed_args["Ny"]
 rel_eps = parsed_args["rel_eps"]
 
-# Get the number of BLAS threads being used
+# Set the number of BLAS threads and check the configuration
 println("Number of BLAS threads:", BLAS.get_num_threads())
+println("BLAS config:", BLAS.get_config())
 
 # Setup the domain for the problem, including the differentiation
 # matrices
