@@ -1,34 +1,7 @@
 # This script tests a CPU implementation of a Sylvester solver
-
-import Base: find_package
-
-# Check if MKL is available. If so, use it.
-if find_package("MKL") !== nothing
-	println("Intel MKL installation found.")
-	using MKL
-else
-	println("Intel MKL installation not found.")
-	println("Running with the default installation.")
-end
+# based on Krylov subspace methods.
 
 using ArgParse
-using Printf
-using BenchmarkTools
-using LinearAlgebra
-using SparseArrays
-using MatrixEquations
-
-include("diffmat2.jl")
-include("sylvester_extended_krylov.jl")
-
-"""
-Helper function to create the 2D grid
-"""
-function ndgrid(x, y)
-    X = [i for i in x, j in 1:length(y)]
-    Y = [j for i in 1:length(x), j in y]
-    return X, Y
-end
 
 # Retrieve the command line arguments
 settings = ArgParseSettings()
@@ -54,6 +27,10 @@ settings = ArgParseSettings()
         help = "Relative truncation tolerance for SVD truncation"
         arg_type = Float64
         default = 1.0e-3
+    "--use_mkl"
+        help = "Use the Intel Math Kernel Library rather than OpenBLAS"
+        arg_type = Bool
+        default = false
 end
 
 # Parse the arguments and print them to the command line
@@ -70,8 +47,37 @@ Ly = parsed_args["Ly"]
 Nx = parsed_args["Nx"]
 Ny = parsed_args["Ny"]
 rel_eps = parsed_args["rel_eps"]
+use_mkl = parsed_args["use_mkl"]
 
-# Set the number of BLAS threads and check the configuration
+import Base: find_package
+
+# Check if MKL is available. If so, use it.
+if use_mkl && find_package("MKL") !== nothing
+	println("Intel MKL installation found.")
+	using MKL
+else
+	println("Running with the default OpenBLAS installation.")
+end
+
+using Printf
+using BenchmarkTools
+using LinearAlgebra
+using SparseArrays
+using MatrixEquations
+
+include("diffmat2.jl")
+include("sylvester_extended_krylov.jl")
+
+"""
+Helper function to create the 2D grid
+"""
+function ndgrid(x, y)
+    X = [i for i in x, j in 1:length(y)]
+    Y = [j for i in 1:length(x), j in y]
+    return X, Y
+end
+
+# Get the number of BLAS threads and check the configuration
 println("Number of BLAS threads:", BLAS.get_num_threads())
 println("BLAS config:", BLAS.get_config())
 
@@ -122,7 +128,7 @@ Vx_nn, Vy_nn, S_nn, s = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps
 # Reset defaults for the number of samples and total time for
 # the benchmarking process
 BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
-BenchmarkTools.DEFAULT_PARAMETERS.seconds = 30
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
 benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
 
@@ -136,6 +142,4 @@ sample_times /= 10^9
 @printf "Median (s): %.8e\n" median(sample_times)
 @printf "Mean (s): %.8e\n" mean(sample_times)
 @printf "Standard deviation (s): %.8e\n" std(sample_times)
-
-
 
