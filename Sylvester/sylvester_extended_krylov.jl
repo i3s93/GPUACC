@@ -15,26 +15,27 @@ Input:
 Output:
     solution factor   X = Vx_nn*S_nn*Vy_nn'
 """
-@fastmath function sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, tol)
+@fastmath @views function sylvester_extended_krylov(Vx_n::AbstractMatrix, Vy_n::AbstractMatrix, S_n::AbstractMatrix, 
+                                                    A::AbstractMatrix, B::AbstractMatrix, tol::Real)
 
     # Precompute the norm of SVD from the previous level
     normb = norm(S_n)
 
-    # Precompute the factorization of A and B
-    FA = factorize(A)
-    FB = factorize(B)
+    # Precompute the LU factorization of A and B
+    FA = lu(A)
+    FB = lu(B)
 
-    DxVxn = Vx_n
-    DyVyn = Vy_n
+    DxVxn = similar(Vx_n)
+    DyVyn = similar(Vy_n)
 
-    Dxinv = Vx_n
-    Dyinv = Vy_n
+    Dxinv = similar(Vx_n)
+    Dyinv = similar(Vy_n)
 
     # Create these variables for storing output
-    S1 = S_n
-    Vx_nn = Vx_n
-    Vy_nn = Vy_n
-    S_nn = S_n
+    S1 = similar(S_n)
+    Vx_nn = similar(Vx_n)
+    Vy_nn = similar(Vy_n)
+    S_nn = similar(S_n)
 
     # Variables to track during construction of the Krylov subspaces
     converged = false
@@ -98,16 +99,14 @@ Output:
 
     # Here S1n is a vector so we do this before
     # we promote S1n to a diagonal matrix
-    r = findlast(x -> x > tol, S1n)
+    r = findlast(x -> x > tol, S1n./max(S1n))
     S1n = Diagonal(S1n)
 
     # Use views to prevent unnecessary copies
-    Vx_nn = Vx_nn*view(t1, :, 1:r)
-    Vy_nn = Vy_nn*view(t2, :, 1:r)
-    S_nn = view(S1n, 1:r, 1:r)
+    Vx_nn = Vx_nn*t1[:, 1:r]
+    Vy_nn = Vy_nn*t2[:, 1:r]
+    S_nn = S1n[1:r, 1:r]
 
     return Vx_nn, Vy_nn, S_nn, iter_count
 
 end
-
-
