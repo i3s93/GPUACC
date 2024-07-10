@@ -69,39 +69,34 @@ using InteractiveUtils
 using Profile
 using ProfileView
 
-include("diffmat2.jl")
-include("sylvester_extended_krylov_optimized.jl")
-#include("sylvester_extended_krylov.jl")
-
-"""
-Helper function to create the 2D grid
-"""
-function ndgrid(x::AbstractVector{T}, y::AbstractVector{T}) where {T <: Number}
-    X = [i for i in x, j in 1:length(y)]
-    Y = [j for i in 1:length(x), j in y]
-    return X, Y
-end
+include("ndgrid.jl")
+include("sylvester_extended_krylov.jl")
 
 # Get the number of BLAS threads and check the configuration
 println("Number of BLAS threads:", BLAS.get_num_threads())
 println("BLAS config:", BLAS.get_config())
 
-# Setup the domain for the problem, including the differentiation
-# matrices
-xspan = [0, Lx] 
-yspan = [0, Ly]
-
-x, _, Dxx = diffmat2(Nx, xspan)
-y, _, Dyy = diffmat2(Ny, yspan)
-
+# Setup the domain as well as the differentiation matrices
 # Exclude the first and last endpoints for the boundary conditions
-x = x[2:end-1]
-y = y[2:end-1]
-
-Dxx = Dxx[2:end-1,2:end-1]
-Dyy = Dyy[2:end-1,2:end-1]
-
+dx = Lx/(Nx-1)
+dy = Ly/(Ny-1)
+x = [i*dx for i in 0:(Nx-2)]
+y = [j*dy for j in 0:(Ny-2)]
 X, Y = ndgrid(x, y)
+
+# Define most of Dxx by its diagonals.
+d0 =  fill(-2/dx^2, Nx-1)    # main diagonal
+dpm = ones(Nx-2)/dx^2       # super- and subdiagonal
+Dxx = spdiagm(-1=>dpm, 0=>d0, 1=>dpm)
+Dyy = Dxx
+
+# Define matrices for the implicit scheme
+# Can either build the matrices in a full or sparse manner
+dtn = 1.0e-2           # Time step size
+d1 = 0.5               # Diffusion coefficient for ddx
+d2 = 0.5               # Diffusion coefficient for ddy
+A = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
+B = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
 
 # Create the initial data
 U = 0.5 * exp.(-400 * (X .- 0.3).^2 .- 400 * (Y .- 0.35).^2 ) .+ 
@@ -117,29 +112,20 @@ Vx_n = Vx_n[:, 1:2]
 Vy_n = Vy_n[:, 1:2]
 S_n = S_n[1:2,1:2]
 
-# Define matrices for the implicit scheme
-# Can either build the matrices in a full or sparse manner
-dtn = 1.0e-2           # Time step size
-d1 = 0.5               # Diffusion coefficient for ddx
-d2 = 0.5               # Diffusion coefficient for ddy
-#A = (1/3) * I(size(Dxx, 1)) - dtn * d1^2 * Dxx
-#B = (1/3) * I(size(Dyy, 1)) - dtn * d2^2 * Dyy 
-A = (1/3) * spdiagm(0 => ones(size(Dxx, 1))) - dtn * d1^2 * sparse(Dxx)  
-B = (1/3) * spdiagm(0 => ones(size(Dyy, 1))) - dtn * d2^2 * sparse(Dyy)
-
-# Set the maximum number of iterations and maximum rank
+# Call the Sylvester solver
 max_iter = 10
-max_rank = 64
+max_rank = 10
+Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
-# # Call the Sylvester solver
-# Vx_nn, Vy_nn, S_nn, s = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
+# #@code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+
 
 # # Reset defaults for the number of samples and total time for
 # # the benchmarking process
 # BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
-# benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
+# benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 # # Times are in nano-seconds (ns) which are converted to seconds
 # sample_times = benchmark_data.times
@@ -152,10 +138,20 @@ max_rank = 64
 # @printf "Mean (s): %.8e\n" mean(sample_times)
 # @printf "Standard deviation (s): %.8e\n" std(sample_times)
 
-# # ProfileView.@profview sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
-# # ProfileView.@profview sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
 
-sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# # # Profiling (code is assumed to already be compiled)
+# # # Initialize the profiler with a smaller sampling interval
+# # Profile.init(delay = 1.0e-6)  # delay in seconds
+
+# # @profile begin
+# #     for iter = 1:100
+# #         sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# #     end
+# # end 
+
+# # open("./profile_data.txt", "w") do s
+# #     Profile.print(C = false, IOContext(s, :displaysize => (24, 500)))
+# # end
 
 
 
@@ -168,7 +164,7 @@ sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 # Profiling the original application (minimally optimized)
 # # Run first to avoid profiling the compiler...
-# sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
+# @code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
 
 # # Initialize the profiler with a smaller sampling interval
 # Profile.init(delay = 1.0e-9)  # delay in seconds
