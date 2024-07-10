@@ -65,9 +65,9 @@ using LinearAlgebra
 using SparseArrays
 using MatrixEquations
 
-using InteractiveUtils
-using Profile
-using ProfileView
+# using InteractiveUtils
+# using Profile
+# using ProfileView
 
 include("ndgrid.jl")
 include("sylvester_extended_krylov.jl")
@@ -113,30 +113,31 @@ Vy_n = Vy_n[:, 1:2]
 S_n = S_n[1:2,1:2]
 
 # Call the Sylvester solver
-max_iter = 10
+max_iter = 100
 max_rank = 10
 Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
+# Use this to check for a type instability
 # #@code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 
-# # Reset defaults for the number of samples and total time for
-# # the benchmarking process
-# BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
-# BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
+# Reset defaults for the number of samples and total time for
+# the benchmarking process
+BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
-# benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
-# # Times are in nano-seconds (ns) which are converted to seconds
-# sample_times = benchmark_data.times
-# sample_times /= 10^9
+# Times are in nano-seconds (ns) which are converted to seconds
+sample_times = benchmark_data.times
+sample_times /= 10^9
 
-# @printf "CPU results:\n"
-# @printf "Minimum (s): %.8e\n" minimum(sample_times)
-# @printf "Maximum (s): %.8e\n" maximum(sample_times)
-# @printf "Median (s): %.8e\n" median(sample_times)
-# @printf "Mean (s): %.8e\n" mean(sample_times)
-# @printf "Standard deviation (s): %.8e\n" std(sample_times)
+@printf "CPU results:\n"
+@printf "Minimum (s): %.8e\n" minimum(sample_times)
+@printf "Maximum (s): %.8e\n" maximum(sample_times)
+@printf "Median (s): %.8e\n" median(sample_times)
+@printf "Mean (s): %.8e\n" mean(sample_times)
+@printf "Standard deviation (s): %.8e\n" std(sample_times)
 
 
 # # # Profiling (code is assumed to already be compiled)
@@ -152,25 +153,3 @@ Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_
 # # open("./profile_data.txt", "w") do s
 # #     Profile.print(C = false, IOContext(s, :displaysize => (24, 500)))
 # # end
-
-
-
-
-
-
-
-
-
-
-# Profiling the original application (minimally optimized)
-# # Run first to avoid profiling the compiler...
-# @code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
-
-# # Initialize the profiler with a smaller sampling interval
-# Profile.init(delay = 1.0e-9)  # delay in seconds
-
-# @profile sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps)
-
-# open("./profile_data.txt", "w") do s
-#     Profile.print(C = false, IOContext(s, :displaysize => (24, 500)))
-# end
