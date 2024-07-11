@@ -11,7 +11,7 @@
 #SBATCH --constraint=gpu
 #SBATCH --gpus=1 # Number of GPUs to use in this example
 #SBATCH --exclusive # Request exlusive use of the resources
-#SBATCH --time=0-01:00:00 # Maximum runtime (D-HH:MM:SS)
+#SBATCH --time=0-02:00:00 # Maximum runtime (D-HH:MM:SS)
 #SBATCH --mail-type=END # Send email at job completion
 #SBATCH --mail-user=wsands@udel.edu # Email address for notifications
 
@@ -25,7 +25,7 @@ module load julia
 N_list="256 512 1024 2048 4096 8192"
 
 # Use at least 10 repetitions for each case
-num_reps=20
+num_reps=10
 
 # Alternate between the CPU and GPU examples
 for N in $N_list
