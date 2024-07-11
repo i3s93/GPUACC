@@ -65,9 +65,9 @@ using LinearAlgebra
 using SparseArrays
 using MatrixEquations
 
-# using InteractiveUtils
-# using Profile
-# using ProfileView
+using InteractiveUtils
+using Profile
+using ProfileView
 
 include("ndgrid.jl")
 include("sylvester_extended_krylov.jl")
@@ -98,6 +98,9 @@ d2 = 0.5               # Diffusion coefficient for ddy
 A = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
 B = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
 
+A = Matrix(A)
+B = Matrix(B)
+
 # Create the initial data
 U = 0.5 * exp.(-400 * (X .- 0.3).^2 .- 400 * (Y .- 0.35).^2 ) .+ 
      0.8 * exp.(-400 * (X .- 0.65).^2 .- 400 * (Y .- 0.5).^2 )
@@ -117,8 +120,8 @@ max_iter = 100
 max_rank = 10
 Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
-# Use this to check for a type instability
-# #@code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# # Use this to check for a type instability
+# @code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 
 # Reset defaults for the number of samples and total time for
@@ -140,15 +143,15 @@ sample_times /= 10^9
 @printf "Standard deviation (s): %.8e\n" std(sample_times)
 
 
-# # # Profiling (code is assumed to already be compiled)
-# # # Initialize the profiler with a smaller sampling interval
-# # Profile.init(delay = 1.0e-6)  # delay in seconds
+# # Profiling (code is assumed to already be compiled)
+# # Initialize the profiler with a smaller sampling interval
+# Profile.init(delay = 1.0e-6)  # delay in seconds
 
-# # @profile begin
-# #     for iter = 1:100
-# #         sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
-# #     end
-# # end 
+# ProfileView.@profview begin
+#     for iter = 1:10
+#         sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+#     end
+# end 
 
 # # open("./profile_data.txt", "w") do s
 # #     Profile.print(C = false, IOContext(s, :displaysize => (24, 500)))

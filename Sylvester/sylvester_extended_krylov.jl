@@ -1,3 +1,5 @@
+include("sym_sylvester.jl")
+
 """
 Approximately solve:
     A1 X + X A2' + U_old*S_old*V_old' = 0
@@ -78,6 +80,7 @@ complexity of its formation.
         B1_tilde = (U'*U_old)*S_old*(V_old'*V)
         
         S1 = sylvc(A1_tilde, A2_tilde, B1_tilde)
+        #S1 = sym_sylvc(A1_tilde, A2_tilde, B1_tilde)
 
         # Check convergence of the solver
         _, RU = qr!(hcat(U, A1U))
