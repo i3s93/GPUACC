@@ -1,5 +1,5 @@
 # This script tests a CPU eigenvalue decomposition.
-# It benchmarks the factorization A = Q \Gamma Q', where A is an M x M matrix
+# It benchmarks the factorization A = Q \Gamma Q', where A is an N x N matrix
 
 using ArgParse
 using Printf
@@ -10,8 +10,8 @@ using LinearAlgebra
 s = ArgParseSettings()
 
 @add_arg_table s begin
-    "-M", "--M"
-        help = "Number of rows in A";
+    "-N", "--N"
+        help = "Size of the square matrix A";
         arg_type = Int
         default = 256
     "-s", "--s"
@@ -21,7 +21,7 @@ s = ArgParseSettings()
     "--symmetric"
         help = "Test the eigendecomposition using symmetric matrices"
         arg_type = Bool
-        default = true
+        default = false
 end
 
 # Parse the arguments and print them to the command line
@@ -33,7 +33,7 @@ for (arg,val) in parsed_args
 end
 
 # Get the individual command line arguments from the dictionary
-M = parsed_args["M"]
+N = parsed_args["N"]
 s = parsed_args["s"]
 make_symmetric = parsed_args["symmetric"]
 
@@ -48,7 +48,7 @@ BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 # Setup the matrices for the operation
 # We declare these as "cost" so they are not treated as globals
 # Alternatively, we could have used interpolation here.
-A = randn(Float64, (M, M))
+A = randn(Float64, (N, N))
 
 # Is A supposed to be symmetric? If so make it symmetric and tag it
 if make_symmetric

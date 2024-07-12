@@ -27,13 +27,15 @@ N_list="256 512 1024 2048 4096 8192"
 # Use at least 10 repetitions for each case
 num_reps=10
 
+use_symmetric=false
+
 # Alternate between the CPU and GPU examples
 for N in $N_list
 do
 	printf "\n"
-    julia eigen_cpu.jl -M=$N -N=$N -s=$num_reps 
+    julia eigen_cpu.jl -N=$N -s=$num_reps --symmetric=$use_symmetric 
 	printf "\n"
-    julia eigen_gpu.jl -M=$N -N=$N -s=$num_reps
+    julia eigen_gpu.jl -N=$N -s=$num_reps --symmetric=$use_symmetric
 	printf "\n"
 done
 
