@@ -34,7 +34,7 @@ for (arg,val) in parsed_args
 end
 
 # Get the individual command line arguments from the dictionary
-M = parsed_args["N"]
+N = parsed_args["N"]
 s = parsed_args["s"]
 make_symmetric = parsed_args["symmetric"]
 
