@@ -70,7 +70,7 @@ using Profile
 using ProfileView
 
 include("ndgrid.jl")
-include("sylvester_extended_krylov.jl")
+include("extended_krylov_step.jl")
 
 # Get the number of BLAS threads and check the configuration
 println("Number of BLAS threads:", BLAS.get_num_threads())
@@ -121,13 +121,13 @@ max_rank = 100
 
 @btime begin
 
-    Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+    Vx_nn, Vy_nn, S_nn, iter = extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
     
 end
 
 
 # # Use this to check for a type instability
-# @code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# @code_warntype extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 
 # # Reset defaults for the number of samples and total time for
@@ -135,7 +135,7 @@ end
 # BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
-# benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# benchmark_data = @benchmark extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 # # Times are in nano-seconds (ns) which are converted to seconds
 # sample_times = benchmark_data.times
@@ -155,7 +155,7 @@ end
 
 # ProfileView.@profview begin
 #     for iter = 1:50
-#         sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+#         extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 #     end
 # end 
 

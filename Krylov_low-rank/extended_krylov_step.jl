@@ -17,7 +17,7 @@ The iteration terminates early provided the following condition is satisfied:
 This quantity is measured by projecting onto the low-dimensional subspaces to reduce the
 complexity of its formation. We use the spectral norm here.
 """
-@fastmath @views function sylvester_extended_krylov(U_old::AbstractMatrix, V_old::AbstractMatrix, S_old::AbstractMatrix, 
+@fastmath @views function extended_krylov_step(U_old::AbstractMatrix, V_old::AbstractMatrix, S_old::AbstractMatrix, 
                                              A1::AbstractMatrix, A2::AbstractMatrix, 
                                              rel_eps::Real, max_iter::Int, max_rank::Int, max_size::Int = 256)
 
@@ -162,9 +162,4 @@ complexity of its formation. We use the spectral norm here.
 
     return U_new, V_new, S_new, num_iterations
 
-    findlast
-
 end
-
-
- 

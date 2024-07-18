@@ -15,9 +15,9 @@
 # Output:
 #     solution factor   X = U_new*S_new*V_new'
 # """
-# function sylvester_extended_krylov(U_old::AbstractMatrix, V_old::AbstractMatrix, S_old::AbstractMatrix, 
-#                                    A1::AbstractMatrix, A2::AbstractMatrix, 
-#                                    tol::Real, max_iter::Int, max_rank::Int)
+# function extended_krylov_step(U_old::AbstractMatrix, V_old::AbstractMatrix, S_old::AbstractMatrix, 
+#                               A1::AbstractMatrix, A2::AbstractMatrix, 
+#                               tol::Real, max_iter::Int, max_rank::Int)
 
 #     # Retrieve some sizes from the input data
 #     U_extents = size(U_old)
