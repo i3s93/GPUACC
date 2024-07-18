@@ -98,12 +98,12 @@ d2 = 0.5               # Diffusion coefficient for ddy
 A = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
 B = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
 
-A = Matrix(A)
-B = Matrix(B)
+# A = Matrix(A)
+# B = Matrix(B)
 
 # Create the initial data
-U = 0.5 * exp.(-400 * (X .- 0.3).^2 .- 400 * (Y .- 0.35).^2 ) .+ 
-     0.8 * exp.(-400 * (X .- 0.65).^2 .- 400 * (Y .- 0.5).^2 )
+U = @. 0.5 * exp(-400 * (X - 0.3)^2 - 400 * (Y - 0.35)^2 ) + 
+     0.8 * exp(-400 * (X - 0.65)^2 - 400 * (Y - 0.5)^2 )
 
 # Apply the SVD to the initial data
 Vx_n, S_n, Vy_n = svd(U)
@@ -116,39 +116,45 @@ Vy_n = Vy_n[:, 1:2]
 S_n = S_n[1:2,1:2]
 
 # Call the Sylvester solver
-max_iter = 100
-max_rank = 10
-Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+max_iter = 10
+max_rank = 100
+
+@btime begin
+
+    Vx_nn, Vy_nn, S_nn, iter = sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+    
+end
+
 
 # # Use this to check for a type instability
 # @code_warntype sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
 
-# Reset defaults for the number of samples and total time for
-# the benchmarking process
-BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
-BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
+# # Reset defaults for the number of samples and total time for
+# # the benchmarking process
+# BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
+# BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
-benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# benchmark_data = @benchmark sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 
-# Times are in nano-seconds (ns) which are converted to seconds
-sample_times = benchmark_data.times
-sample_times /= 10^9
+# # Times are in nano-seconds (ns) which are converted to seconds
+# sample_times = benchmark_data.times
+# sample_times /= 10^9
 
-@printf "CPU results:\n"
-@printf "Minimum (s): %.8e\n" minimum(sample_times)
-@printf "Maximum (s): %.8e\n" maximum(sample_times)
-@printf "Median (s): %.8e\n" median(sample_times)
-@printf "Mean (s): %.8e\n" mean(sample_times)
-@printf "Standard deviation (s): %.8e\n" std(sample_times)
+# @printf "CPU results:\n"
+# @printf "Minimum (s): %.8e\n" minimum(sample_times)
+# @printf "Maximum (s): %.8e\n" maximum(sample_times)
+# @printf "Median (s): %.8e\n" median(sample_times)
+# @printf "Mean (s): %.8e\n" mean(sample_times)
+# @printf "Standard deviation (s): %.8e\n" std(sample_times)
 
 
 # # Profiling (code is assumed to already be compiled)
 # # Initialize the profiler with a smaller sampling interval
-# Profile.init(delay = 1.0e-6)  # delay in seconds
+# Profile.init()  # delay in seconds
 
 # ProfileView.@profview begin
-#     for iter = 1:10
+#     for iter = 1:50
 #         sylvester_extended_krylov(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
 #     end
 # end 

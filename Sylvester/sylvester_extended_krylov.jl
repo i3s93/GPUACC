@@ -1,5 +1,3 @@
-include("sym_sylvester.jl")
-
 """
 Approximately solve:
     A1 X + X A2' + U_old*S_old*V_old' = 0
@@ -17,14 +15,18 @@ Output:
 The iteration terminates early provided the following condition is satisfied:
     ||A1 X + X A2'- U_old*S_old*V_old'|| < ||U_old*S_old*V_old'|| * tol.
 This quantity is measured by projecting onto the low-dimensional subspaces to reduce the
-complexity of its formation.
+complexity of its formation. We use the spectral norm here.
 """
 @fastmath @views function sylvester_extended_krylov(U_old::AbstractMatrix, V_old::AbstractMatrix, S_old::AbstractMatrix, 
                                              A1::AbstractMatrix, A2::AbstractMatrix, 
-                                             rel_eps::Real, max_iter::Int, max_rank::Int)
+                                             rel_eps::Real, max_iter::Int, max_rank::Int, max_size::Int = 256)
+
+    # Number of columns used in the updated bases (changes across iterations)
+    U_ncols = size(U_old,2)
+    V_ncols = size(V_old,2)
 
     # Tolerance for the construction of the Krylov basis
-    threshold = opnorm(S_old)*rel_eps
+    threshold = opnorm(S_old,2)*rel_eps
 
     # Precompute the LU factorizations of A1 and A2
     FA1 = lu(A1)
@@ -42,10 +44,23 @@ complexity of its formation.
     inv_A1U_curr = similar(U_old)
     inv_A2V_curr = similar(V_old)
 
-    # Declarations for scoping
-    S1 = similar(S_old) 
-    U = copy(U_old) # Initialize the Krylov bases for U
-    V = copy(V_old) # Initialize the Krylov bases for V
+    # Storage for the solution of the reduced Sylvester equation
+    S1 = similar(S_old, max_size, max_size) 
+    A1_tilde = similar(U_old, max_size, max_size)
+    A2_tilde = similar(U_old, max_size, max_size)
+    B1_tilde = similar(U_old, max_size, max_size)
+
+    # Preallocate and initialize the data for the evaluation of the residual
+    U = similar(U_old, size(U_old,1), max_size)
+    V = similar(V_old, size(V_old,1), max_size)
+    U[:,1:U_ncols] .= U_old[:,1:U_ncols]
+    V[:,1:V_ncols] .= V_old[:,1:U_ncols]
+
+    A1U = similar(U_old, size(U_old,1), max_size)
+    A2V = similar(V_old, size(V_old,1), max_size)
+
+    block_matrix = similar(U_old, max_size, max_size)
+    residual = similar(U_old, max_size, max_size)
 
     # Variables to track during construction of the Krylov subspaces
     converged = false
@@ -54,98 +69,102 @@ complexity of its formation.
     for iter_count = 1:max_iter
 
         # Extended Krylov bases and concatenate with the existing bases
+        #
+        # TO-DO: Define "batched" versions of these triangular solves for
+        # the inverse operation so they can be performed concurrently
         mul!(A1U_curr, A1, A1U_prev)
         ldiv!(inv_A1U_curr, FA1, inv_A1U_prev)
 
         mul!(A2V_curr, A2, A2V_prev)
         ldiv!(inv_A2V_curr, FA2, inv_A2V_prev)
 
-        U_ext = hcat(U, A1U_curr, inv_A1U_curr)
-        V_ext = hcat(V, A2V_curr, inv_A2V_curr)
+        U_aug = hcat(U[:,1:U_ncols], A1U_curr, inv_A1U_curr)
+        V_aug = hcat(V[:,1:V_ncols], A2V_curr, inv_A2V_curr)
 
         # Orthogonalize the augmented bases
-        U, _ = qr!(U_ext)
-        V, _ = qr!(V_ext)
+        # R is ignores from the output
+        Q_U, _ = qr!(U_aug)
+        Q_V, _ = qr!(V_aug)
+        
+        # To get the thin form, the compact structs for Q_U and Q_V
+        # need to be cast as a matrix type
+        Q_U = Matrix(Q_U)
+        Q_V = Matrix(Q_V)
 
-        # Convert the basis to matrices
-        U = Matrix(U)
-        V = Matrix(V)
+        # Get the current sizes of the bases
+        U_ncols = size(Q_U,2)
+        V_ncols = size(Q_V,2)
+
+        U[:,1:U_ncols] .= Q_U
+        V[:,1:V_ncols] .= Q_V
 
         # Build and solve the reduced system using the Sylvester solver
-        A1U = A1*U
-        A2V = A2*V
+        A1U[:,1:U_ncols] .= A1*U[:,1:U_ncols]
+        A2V[:,1:V_ncols] .= A2*V[:,1:V_ncols]
 
-        A1_tilde = U'*A1U
-        A2_tilde = V'*A2V  
-        B1_tilde = (U'*U_old)*S_old*(V_old'*V)
+        A1_tilde[1:U_ncols,1:U_ncols] .= U[:,1:U_ncols]'*A1U[:,1:U_ncols]
+        A2_tilde[1:V_ncols,1:V_ncols] .= V[:,1:V_ncols]'*A2V[:,1:V_ncols]
+        B1_tilde[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
         
-        S1 = sylvc(A1_tilde, A2_tilde, B1_tilde)
-        #S1 = sym_sylvc(A1_tilde, A2_tilde, B1_tilde)
+        A1_local = A1_tilde[1:U_ncols,1:U_ncols]
+        A2_local = A2_tilde[1:V_ncols,1:V_ncols]
+        B1_local = B1_tilde[1:U_ncols,1:V_ncols]
 
-        # Check convergence of the solver
-        _, RU = qr!(hcat(U, A1U))
-        _, RV = qr!(hcat(V, A2V))
+        S1_local = sylvc(A1_local, A2_local, B1_local)::typeof(S1)
 
-        residual = RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
+        S1[1:U_ncols,1:V_ncols] = S1_local
 
-        if opnorm(residual) < threshold
+        # Check convergence of the solver using the spectral norm of the residual
+        # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
+        # This requires the upper triangular matrices from the QR factorization here
+        _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
+        _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
+
+        # Build the blocks of the matrix [-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]
+        block_matrix[1:U_ncols,1:V_ncols] .= -B1_tilde[1:U_ncols,1:V_ncols]
+        block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= S1[1:U_ncols,1:V_ncols]
+        block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= S1[1:U_ncols,1:V_ncols]
+        block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
+
+        # Create a reference to the relevant block of the residual
+        residual_block = residual[1:size(RU,1),1:size(RV,2)]
+        residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
+
+        if opnorm(residual_block,2) < threshold
             num_iterations = iter_count
             converged = true
             break
         end
 
-        copy!(A1U_prev, A1U_curr)
-        copy!(inv_A1U_prev, inv_A1U_curr)
+        A1U_prev .= A1U_curr
+        inv_A1U_prev .= inv_A1U_curr
 
-        copy!(A2V_prev, A2V_curr)
-        copy!(inv_A2V_prev, inv_A2V_curr)
+        A2V_prev .= A2V_curr
+        inv_A2V_prev .= inv_A2V_curr
 
     end
 
     # Perform SVD truncation on the dense solution tensor
-    U_tilde, S_tilde, V_tilde = svd!(S1)
+    U_tilde, S_tilde, V_tilde = svd!(S1[1:U_ncols,1:V_ncols])
 
     # Here S_tilde is a vector, so we do this before
     # we promote S_tilde to a diagonal matrix
-    #r = findlast(x -> x > rel_eps, S_tilde./maximum(S_tilde))
-    r = find_last_rank(S_tilde./maximum(S_tilde), rel_eps, max_rank)
+    # We can exploit the fact that S_tilde is ordered (descending)
+    r = sum(S_tilde .> rel_eps*S_tilde[1])
+    r = min(r, max_rank)
 
     # Define the new core tensor
-    S_new = diagm(S_tilde[1:r])
+    S_new = Diagonal(S_tilde[1:r])
 
     # Join the orthogonal bases from the QR and SVD steps
-    U_new = U*view(U_tilde, :, 1:r)
-    V_new = V*view(V_tilde, :, 1:r)
+    U_new = U[:,1:U_ncols]*U_tilde[1:U_ncols,1:r]
+    V_new = V[:,1:V_ncols]*V_tilde[1:V_ncols,1:r]
 
     return U_new, V_new, S_new, num_iterations
 
+    findlast
+
 end
 
-
-"""
-A helper function for performing SVD truncation. The Input
-array is assumed to be sorted in descending order, following
-the usual convention of the SVD.
-
-It finds the last index of an array that exceeds the tolerance tol.
-"""
-@fastmath function find_last_rank(x::AbstractArray, tol::Real, max_rank::Int)
-    
-    # Initialize the index for the rank
-    r = 1
-
-    # Since the array is ordered, we can break on the first instance
-    @inbounds for i in eachindex(x)
-        if x[i] < tol
-            r = i
-            break
-        end
-    end
-
-    # If the rank exceeds the maximum, use the max_rank instead
-    r = min(r, max_rank)
-
-    return r
- end
 
  
