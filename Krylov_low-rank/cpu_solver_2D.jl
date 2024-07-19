@@ -118,10 +118,11 @@ S_n = S_n[1:2,1:2]
 # Call the Sylvester solver
 max_iter = 10
 max_rank = 100
+max_size = 50
 
 @btime begin
 
-    Vx_nn, Vy_nn, S_nn, iter = extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+    Vx_nn, Vy_nn, S_nn, iter = extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank, max_size)
     
 end
 

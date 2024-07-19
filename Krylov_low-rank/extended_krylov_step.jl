@@ -1,5 +1,3 @@
-include("wrapped_qr.jl")
-
 """
 Approximately solve:
     A1 X + X A2' + U_old*S_old*V_old' = 0
@@ -34,6 +32,12 @@ complexity of its formation. We use the spectral norm here.
     FA1 = lu(A1)
     FA2 = lu(A2)
 
+    # Storage for the Krylov bases
+    U = similar(U_old, size(U_old,1), max_size)
+    V = similar(V_old, size(V_old,1), max_size)
+    U[:,1:U_ncols] .= U_old[:,1:U_ncols]
+    V[:,1:V_ncols] .= V_old[:,1:U_ncols]
+
     # Storage for A1^{k}U and A2^{k}V for two iterates
     A1U_prev = copy(U_old)
     A2V_prev = copy(V_old)
@@ -53,11 +57,6 @@ complexity of its formation. We use the spectral norm here.
     B1_tilde = similar(U_old, max_size, max_size)
 
     # Preallocate and initialize the data for the evaluation of the residual
-    U = similar(U_old, size(U_old,1), max_size)
-    V = similar(V_old, size(V_old,1), max_size)
-    U[:,1:U_ncols] .= U_old[:,1:U_ncols]
-    V[:,1:V_ncols] .= V_old[:,1:U_ncols]
-
     A1U = similar(U_old, size(U_old,1), max_size)
     A2V = similar(V_old, size(V_old,1), max_size)
 
@@ -83,16 +82,18 @@ complexity of its formation. We use the spectral norm here.
         U_aug = hcat(U[:,1:U_ncols], A1U_curr, inv_A1U_curr)
         V_aug = hcat(V[:,1:V_ncols], A2V_curr, inv_A2V_curr)
 
-        # Since we need Q as a matrix, we use the wrapped QR here
-        Q_U, _ = thin_qr!(U_aug)
-        Q_V, _ = thin_qr!(V_aug)
+        # Orthogonalize the augmented bases
+        # Note that we don't explicitly need to cast to the appropriate type
+        # when we transfer the bases
+        F_U = qr!(U_aug)
+        F_V = qr!(V_aug)
 
-        # Get the current sizes of the bases
-        U_ncols = size(Q_U,2)
-        V_ncols = size(Q_V,2)
+        # Get the current sizes of the bases and transfer accordingly
+        U_ncols = size(F_U,2)
+        V_ncols = size(F_V,2)
 
-        U[:,1:U_ncols] .= Q_U
-        V[:,1:V_ncols] .= Q_V
+        U[:,1:U_ncols] .= F_U.Q[:,1:U_ncols]
+        V[:,1:V_ncols] .= F_V.Q[:,1:V_ncols]
 
         # Build and solve the reduced system using the Sylvester solver
         A1U[:,1:U_ncols] .= A1*U[:,1:U_ncols]
@@ -105,10 +106,8 @@ complexity of its formation. We use the spectral norm here.
         A1_local = A1_tilde[1:U_ncols,1:U_ncols]
         A2_local = A2_tilde[1:V_ncols,1:V_ncols]
         B1_local = B1_tilde[1:U_ncols,1:V_ncols]
-
         S1_local = sylvc(A1_local, A2_local, B1_local)::typeof(S1)
-
-        S1[1:U_ncols,1:V_ncols] = S1_local
+        S1[1:U_ncols,1:V_ncols] .= S1_local
 
         # Check convergence of the solver using the spectral norm of the residual
         # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
