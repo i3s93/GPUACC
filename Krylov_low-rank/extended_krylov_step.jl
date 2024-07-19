@@ -1,3 +1,5 @@
+include("wrapped_qr.jl")
+
 """
 Approximately solve:
     A1 X + X A2' + U_old*S_old*V_old' = 0
@@ -81,15 +83,9 @@ complexity of its formation. We use the spectral norm here.
         U_aug = hcat(U[:,1:U_ncols], A1U_curr, inv_A1U_curr)
         V_aug = hcat(V[:,1:V_ncols], A2V_curr, inv_A2V_curr)
 
-        # Orthogonalize the augmented bases
-        # R is ignores from the output
-        Q_U, _ = qr!(U_aug)
-        Q_V, _ = qr!(V_aug)
-        
-        # To get the thin form, the compact structs for Q_U and Q_V
-        # need to be cast as a matrix type
-        Q_U = Matrix(Q_U)
-        Q_V = Matrix(Q_V)
+        # Since we need Q as a matrix, we use the wrapped QR here
+        Q_U, _ = thin_qr!(U_aug)
+        Q_V, _ = thin_qr!(V_aug)
 
         # Get the current sizes of the bases
         U_ncols = size(Q_U,2)
@@ -117,6 +113,7 @@ complexity of its formation. We use the spectral norm here.
         # Check convergence of the solver using the spectral norm of the residual
         # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
         # This requires the upper triangular matrices from the QR factorization here
+        # We use the standard QR here since we don't need Q
         _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
         _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
 
