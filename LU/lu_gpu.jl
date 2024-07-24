@@ -41,6 +41,18 @@ N = parsed_args["N"]
 s = parsed_args["s"]
 use_full = parsed_args["use_full"]
 
+# Function from CUDSS to perform the LU factorization of a CUDA sparse CSR matrix
+# CUDA.jl provides access to the LU solver for the CuMatrix type via the CUSOLVER interface
+function LinearAlgebra.lu(A::CuSparseMatrixCSR{T,Cint}; check = false) where T <: LinearAlgebra.BlasFloat
+    n = LinearAlgebra.checksquare(A)
+    solver = CudssSolver(A, "G", 'F')
+    x = CudssMatrix(T, n)
+    b = CudssMatrix(T, n)
+    cudss("analysis", solver, x, b)
+    cudss("factorization", solver, x, b)
+    return solver
+  end
+
 # Reset defaults for the number of samples and the total time
 # spent for the benchmarking process
 BenchmarkTools.DEFAULT_PARAMETERS.samples = s
