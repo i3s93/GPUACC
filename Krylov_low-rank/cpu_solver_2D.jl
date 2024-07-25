@@ -23,10 +23,22 @@ settings = ArgParseSettings()
         help = "Number grid points in y";
         arg_type = Int
         default = 101
-    "--rel_eps"
+    "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
         arg_type = Float64
         default = 1.0e-3
+    "--max_rank"
+        help = "Maximum rank used in the representation of the function."
+        arg_type = Int
+        default = 32
+    "--max_iter"
+        help = "Maximum number of Krylov iterations"
+        arg_type = Int
+        default = 10
+    "--max_size"
+        help = "Maximum dimension used in the preallocation phase."
+        arg_type = Int
+        default = 64
     "--use_mkl"
         help = "Use the Intel Math Kernel Library rather than OpenBLAS"
         arg_type = Bool
@@ -46,7 +58,10 @@ Lx = parsed_args["Lx"]
 Ly = parsed_args["Ly"]
 Nx = parsed_args["Nx"]
 Ny = parsed_args["Ny"]
-rel_eps = parsed_args["rel_eps"]
+rel_tol = parsed_args["rel_tol"]
+max_rank = parsed_args["max_rank"]
+max_iter = parsed_args["max_iter"]
+max_size = parsed_args["max_size"]
 use_mkl = parsed_args["use_mkl"]
 
 import Base: find_package
@@ -69,12 +84,24 @@ using InteractiveUtils
 using Profile
 using ProfileView
 
-include("ndgrid.jl")
+include("SolverParameters.jl")
+include("State.jl")
+include("Workspace.jl")
 include("extended_krylov_step.jl")
+
+"""
+Helper function to create the 2D grid
+"""
+function ndgrid(x::AbstractVector{T}, y::AbstractVector{T}) where {T <: Number}
+    X = [i for i in x, j in 1:length(y)]
+    Y = [j for i in 1:length(x), j in y]
+    return X, Y
+end
 
 # Get the number of BLAS threads and check the configuration
 println("Number of BLAS threads:", BLAS.get_num_threads())
 println("BLAS config:", BLAS.get_config())
+
 
 # Setup the domain as well as the differentiation matrices
 # Exclude the first and last endpoints for the boundary conditions
@@ -95,71 +122,38 @@ Dyy = Dxx
 dtn = 1.0e-2           # Time step size
 d1 = 0.5               # Diffusion coefficient for ddx
 d2 = 0.5               # Diffusion coefficient for ddy
-A = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
-B = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
-
-# A = Matrix(A)
-# B = Matrix(B)
+A1 = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
+A2 = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
 
 # Create the initial data
-U = @. 0.5 * exp(-400 * (X - 0.3)^2 - 400 * (Y - 0.35)^2 ) + 
+U_init = @. 0.5 * exp(-400 * (X - 0.3)^2 - 400 * (Y - 0.35)^2 ) + 
      0.8 * exp(-400 * (X - 0.65)^2 - 400 * (Y - 0.5)^2 )
 
 # Apply the SVD to the initial data
-Vx_n, S_n, Vy_n = svd(U)
-S_n = Diagonal(S_n)
+Vx_old, S_old, Vy_old = svd(U_init)
+S_old = Diagonal(S_old)
 
 # The initial data is rank two, but we could use information from
 # the singular values
-Vx_n = Vx_n[:, 1:2]
-Vy_n = Vy_n[:, 1:2]
-S_n = S_n[1:2,1:2]
+Vx_old = Vx_old[:, 1:2]
+Vy_old = Vy_old[:, 1:2]
+S_old = S_old[1:2,1:2]
+
+# Create the low-rank state
+state_old = State2D(Vx_old, S_old, Vy_old, 2)
+
+# Setup the parameters for the Krylov iterations
+solver_params = SolverParameters(max_iter = max_iter, max_rank = max_rank, max_size = max_size, rel_tol = rel_tol, backend = CPU_backend())
+
+# Create the reusable workspace for the Krylov method
+# This interface can probably be simplied a bit by creating an additional data structure
+ws = setup_workspaces(typeof(Vx_old), A1, A2, size(Vx_old), size(Vy_old), max_size, solver_params)
+
+#@code_warntype extended_krylov_step!(state_old, ws, solver_params)
 
 # Call the Sylvester solver
-max_iter = 10
-max_rank = 100
-max_size = 50
-
 @btime begin
-
-    Vx_nn, Vy_nn, S_nn, iter = extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank, max_size)
-    
+    state_new, iter = extended_krylov_step!(state_old, ws, solver_params)    
 end
 
 
-# # Use this to check for a type instability
-# @code_warntype extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
-
-
-# # Reset defaults for the number of samples and total time for
-# # the benchmarking process
-# BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
-# BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
-
-# benchmark_data = @benchmark extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
-
-# # Times are in nano-seconds (ns) which are converted to seconds
-# sample_times = benchmark_data.times
-# sample_times /= 10^9
-
-# @printf "CPU results:\n"
-# @printf "Minimum (s): %.8e\n" minimum(sample_times)
-# @printf "Maximum (s): %.8e\n" maximum(sample_times)
-# @printf "Median (s): %.8e\n" median(sample_times)
-# @printf "Mean (s): %.8e\n" mean(sample_times)
-# @printf "Standard deviation (s): %.8e\n" std(sample_times)
-
-
-# # Profiling (code is assumed to already be compiled)
-# # Initialize the profiler with a smaller sampling interval
-# Profile.init()  # delay in seconds
-
-# ProfileView.@profview begin
-#     for iter = 1:50
-#         extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
-#     end
-# end 
-
-# # open("./profile_data.txt", "w") do s
-# #     Profile.print(C = false, IOContext(s, :displaysize => (24, 500)))
-# # end
