@@ -2,6 +2,8 @@ include("State.jl")
 include("Workspace.jl")
 include("SolverParameters.jl")
 
+# TO-DO: These functions should be written using tasks
+
 """
 Function to initialize the bases in the Krylov method. This method is applied prior to the Krylov iteration.
 """
@@ -24,7 +26,7 @@ Function to initialize the bases in the Krylov method. This method is applied pr
 end
 
 """
-Updates the bases during the Krylov iteration. Valid for any workspace.
+Updates and orthogonalizes the bases from the Krylov iteration. Valid for any workspace.
 """
 @fastmath @views function update_bases_and_orthogonalize!(ws::AbstractWorkspace)
 
@@ -85,5 +87,36 @@ Helper function to swap the buffers for the Krylov iteration.
     ws.inv_A2V_prev .= ws.inv_A2V_curr
 
     return nothing
+end
+
+"""
+Performs SVD truncation of the solution. Valid for any workspace and backend.
+
+Computes the SVD of the dense core and then joins the orthogonal bases with those
+obtained from the Krylov iteration to define a new (truncated) state.
+"""
+@fastmath @views function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
+    
+    # Perform SVD truncation on the dense "core"
+    U_tilde, S_tilde, V_tilde = svd!(ws.S1[1:ws.U_ncols,1:ws.V_ncols])
+
+    # Here S_tilde is a vector, so we do this before
+    # we promote S_tilde to a diagonal matrix
+    # We can exploit the fact that S_tilde is ordered (descending)
+    r_new = sum(S_tilde .> params.rel_tol*S_tilde[1])
+    r_new = min(r_new, params.max_rank)
+
+    # Define the new diagonal "core" tensor
+    # Does this work for CuArrays as well???
+    S_new = Diagonal(S_tilde[1:r_new])
+
+    # Join the orthogonal bases from the QR and SVD steps
+    U_new = ws.U[:,1:ws.U_ncols]*U_tilde[1:ws.U_ncols,1:r_new]
+    V_new = ws.V[:,1:ws.V_ncols]*V_tilde[1:ws.V_ncols,1:r_new]
+
+    # Create the truncated low-rank state
+    state_new = State2D(U_new, S_new, V_new, r_new)
+
+    return state_new
 end
 

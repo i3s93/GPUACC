@@ -7,6 +7,3 @@ mutable struct State2D{T1<: AbstractMatrix, T2 <:AbstractMatrix}
     V::T1
     r::Int
 end
-
-
-
