@@ -177,23 +177,23 @@ end
          # Compute the coefficients of the Sylvester equation in parallel and copy them using
          # different streams on the device
          @sync begin
-             A1U_eval = @async begin
-                 A1U[:,1:U_ncols] .= A1*U[:,1:U_ncols]
-             end
-             
-             A2V_eval = @async begin
-                 A2V[:,1:V_ncols] .= A2*V[:,1:V_ncols]
-             end
+            A1U_eval = @async begin
+                mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
+            end
+            
+            A2V_eval = @async begin
+                mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
+            end
  
              A1_tilde_DtH = @async begin
                 A1_tilde = unsafe_wrap(CuArray, A1_tilde)
-                A1_tilde[1:U_ncols,1:U_ncols] .= U[:,1:U_ncols]'*A1U[:,1:U_ncols]
+                mul!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]', A1U[:,1:U_ncols])
                 A1_tilde = unsafe_wrap(Array, A1_tilde)              
              end
  
              A2_tilde_DtH = @async begin
                 A2_tilde = unsafe_wrap(CuArray, A2_tilde)
-                A2_tilde[1:V_ncols,1:V_ncols] .= V[:,1:V_ncols]'*A2V[:,1:V_ncols]
+                mul!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]', A2V[:,1:V_ncols])
                 A2_tilde = unsafe_wrap(Array, A2_tilde)  
              end
  
@@ -206,13 +206,13 @@ end
  
              @async begin
                  wait(A1U_eval)
-                 _, RU = thin_qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
+                 _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
                  R_container[1] = RU
              end
  
              @async begin
                  wait(A2V_eval)
-                 _, RV = thin_qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
+                 _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
                  R_container[2] = RV
              end
  
