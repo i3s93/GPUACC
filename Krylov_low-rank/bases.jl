@@ -2,12 +2,14 @@ include("State.jl")
 include("Workspace.jl")
 include("SolverParameters.jl")
 
+include("materialize_Q.jl")
+
 # TO-DO: These functions should be written using tasks
 
 """
 Function to initialize the bases in the Krylov method. This method is applied prior to the Krylov iteration.
 """
-@fastmath @views function initialize_bases!(ws::ExtendedKrylovWorkspace2D, state_in::State2D)
+@views function initialize_bases!(ws::ExtendedKrylovWorkspace2D, state_in::State2D)
 
     # Set the number of columns for the basis
     ws.U_ncols = size(state_in.U,2)
@@ -28,10 +30,10 @@ end
 """
 Updates and orthogonalizes the bases from the Krylov iteration. Valid for any workspace.
 """
-@fastmath @views function update_bases_and_orthogonalize!(ws::AbstractWorkspace)
+function update_bases_and_orthogonalize!(ws::AbstractWorkspace, backend::Backend)
 
     update_bases!(ws)
-    orthogonalize_bases!(ws)
+    orthogonalize_bases!(ws, backend)
 
     return nothing
 end
@@ -39,7 +41,7 @@ end
 """
 Helper function that calculates the candidate bases during the Krylov iteration.
 """
-@fastmath @views function update_bases!(ws::ExtendedKrylovWorkspace2D)
+function update_bases!(ws::ExtendedKrylovWorkspace2D)
 
     mul!(ws.A1U_curr, ws.A1, ws.A1U_prev)
     ldiv!(ws.inv_A1U_curr, ws.FA1, ws.inv_A1U_prev)
@@ -53,23 +55,24 @@ end
 """
 Helper function that applies QR factorization to orthogonalize the bases.
 """
-@fastmath @views function orthogonalize_bases!(ws::ExtendedKrylovWorkspace2D)
+@views function orthogonalize_bases!(ws::ExtendedKrylovWorkspace2D, backend::Backend)
 
     U_aug = hcat(ws.U[:,1:ws.U_ncols], ws.A1U_curr, ws.inv_A1U_curr)
     V_aug = hcat(ws.V[:,1:ws.V_ncols], ws.A2V_curr, ws.inv_A2V_curr)
 
-    # Orthogonalize the augmented bases
-    # Note that we don't explicitly need to cast to the appropriate type
-    # when we transfer the bases
-    F_U = qr!(U_aug)
-    F_V = qr!(V_aug)
+    # Orthogonalize the augmented bases (ignore the coefficients in R)
+    Q_U, _ = qr!(U_aug)
+    Q_V, _ = qr!(V_aug)
+
+    Q_U = materialize_Q(Q_U, backend)
+    Q_V = materialize_Q(Q_V, backend)
 
     # Update the current sizes of the bases and transfer accordingly
-    ws.U_ncols = size(F_U,2)
-    ws.V_ncols = size(F_V,2)
+    ws.U_ncols = size(Q_U,2)
+    ws.V_ncols = size(Q_V,2)
 
-    ws.U[:,1:ws.U_ncols] .= F_U.Q[:,1:ws.U_ncols]
-    ws.V[:,1:ws.V_ncols] .= F_V.Q[:,1:ws.V_ncols]
+    ws.U[:,1:ws.U_ncols] .= Q_U[:,:]
+    ws.V[:,1:ws.V_ncols] .= Q_V[:,:]
 
     return nothing
 end
@@ -77,7 +80,7 @@ end
 """
 Helper function to swap the buffers for the Krylov iteration.
 """
-@fastmath @views function shuffle_iterates!(ws::ExtendedKrylovWorkspace2D)
+function shuffle_iterates!(ws::ExtendedKrylovWorkspace2D)
 
     # Current values become previous in the next iteration
     ws.A1U_prev .= ws.A1U_curr
@@ -95,7 +98,7 @@ Performs SVD truncation of the solution. Valid for any workspace and backend.
 Computes the SVD of the dense core and then joins the orthogonal bases with those
 obtained from the Krylov iteration to define a new (truncated) state.
 """
-@fastmath @views function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
+@views function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
     
     # Perform SVD truncation on the dense "core"
     U_tilde, S_tilde, V_tilde = svd!(ws.S1[1:ws.U_ncols,1:ws.V_ncols])

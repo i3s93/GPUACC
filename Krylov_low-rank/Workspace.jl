@@ -152,10 +152,10 @@ end
 
         # Pin the CPU memory for these arrays to reduce the transfer time
         # This also allows the scheduler to perform the copies asynchronously
-        S1 = pin(S1)
-        A1_tilde = pin(A1_tilde)
-        A2_tilde = pin(A2_tilde)
-        B1_tilde = pin(B1_tilde)
+        S1 = CUDA.pin(S1)
+        A1_tilde = CUDA.pin(A1_tilde)
+        A2_tilde = CUDA.pin(A2_tilde)
+        B1_tilde = CUDA.pin(B1_tilde)
 
         return S1, A1_tilde, A2_tilde, B1_tilde
 
@@ -213,7 +213,7 @@ Functions to initialize the LU factorizations for the coefficient matrices A1 an
 a method suitable for the given backend and structure of A1 and A2. These are only necessary for the extended
 Krylov methods.
 """
-@fastmath @views function compute_LU_factorizations!(ws::ExtendedKrylovWorkspace2D)
+function compute_LU_factorizations!(ws::ExtendedKrylovWorkspace2D)
     
     ws.FA1 = lu(ws.A1)
     ws.FA2 = lu(ws.A2)

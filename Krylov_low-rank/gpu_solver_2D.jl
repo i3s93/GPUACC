@@ -82,8 +82,8 @@ using SparseArrays
 using MatrixEquations
 
 using InteractiveUtils
-using Profile
-using ProfileView
+# using Profile
+# using ProfileView
 
 include("SolverParameters.jl")
 include("State.jl")
@@ -156,10 +156,10 @@ ws = setup_workspaces(typeof(Vx_old), A1, A2, size(Vx_old), size(Vy_old), max_si
 
 # #@code_warntype extended_krylov_step!(state_old, ws, solver_params)
 
-# # Call the Sylvester solver
-# @btime begin
-#     state_new, iter = extended_krylov_step!(state_old, ws, solver_params)    
-# end
+# Call the Sylvester solver
+@btime begin
+    state_new, iter = extended_krylov_step!(state_old, ws, solver_params)    
+end
 
 
 

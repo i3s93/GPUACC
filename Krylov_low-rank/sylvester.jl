@@ -1,7 +1,9 @@
+#include("thin_qr.jl")
+
 """
 Solves the continuous Sylvester equation on the CPU.
 """
-@fastmath @views function build_and_solve_sylvester!(state_old::State2D, ws::ExtendedKrylovWorkspace2D, backend::CPU_backend)
+@views function build_and_solve_sylvester!(state_old::State2D, ws::ExtendedKrylovWorkspace2D, backend::CPU_backend)
 
     # Unpack the previous low-rank state data
     U_old, S_old, V_old = state_old.U, state_old.S, state_old.V
@@ -16,12 +18,24 @@ Solves the continuous Sylvester equation on the CPU.
     block_matrix, residual = ws.block_matrix, ws.residual
 
     # Build and solve the reduced system using the Sylvester solver
-    A1U[:,1:U_ncols] .= A1*U[:,1:U_ncols]
-    A2V[:,1:V_ncols] .= A2*V[:,1:V_ncols]
+    mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
+    mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
+ 
+    mul!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]', A1U[:,1:U_ncols])
+    mul!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]', A2V[:,1:V_ncols])
 
-    A1_tilde[1:U_ncols,1:U_ncols] .= U[:,1:U_ncols]'*A1U[:,1:U_ncols]
-    A2_tilde[1:V_ncols,1:V_ncols] .= V[:,1:V_ncols]'*A2V[:,1:V_ncols]
-    B1_tilde[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])        
+    # Temporaries for evaluating B1_tilde
+    # B1_tilde[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
+    # TO-DO: Eliminate these allocations from this function and put them in the workspace
+    tmp1 = similar(B1_tilde, U_ncols, size(U_old,2))
+    tmp2 = similar(B1_tilde, size(V_old,2), V_ncols)
+    tmp3 = similar(B1_tilde, U_ncols, size(S_old,2))
+
+    mul!(tmp1, U[:,1:U_ncols]', U_old[:,:])
+    mul!(tmp2, V_old[:,:]', V[:,1:V_ncols])
+    mul!(tmp3, tmp1, S_old)
+    mul!(B1_tilde[1:U_ncols,1:V_ncols], tmp3, tmp2)
+
     S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])
 
     # Check convergence of the solver using the spectral norm of the residual
@@ -36,6 +50,7 @@ Solves the continuous Sylvester equation on the CPU.
     block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
 
     # Create a reference to the relevant block of the residual
+    # TO-DO: Remove the memory allocations here by using temporaries
     residual_block = residual[1:size(RU,1),1:size(RV,2)]
     residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
 
@@ -46,7 +61,7 @@ end
 
 @static if @isdefined(CUDA)
 
-    @fastmath @views function build_and_solve_sylvester!(state_old::State2D, A1::AbstractMatrix, A2::AbstractMatrix, 
+    @views function build_and_solve_sylvester!(state_old::State2D, A1::AbstractMatrix, A2::AbstractMatrix, 
                                         ws::ExtendedKrylovWorkspace2D, U_ncols::Int, V_ncols::Int, backend::CUDA_backend)
 
         # Unpack the previous low-rank state data
@@ -65,11 +80,11 @@ end
         # different streams on the device
         @sync begin
             A1U_eval = @async begin
-                A1U[:,1:U_ncols] .= A1*U[:,1:U_ncols]
+                mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
             end
             
             A2V_eval = @async begin
-                A2V[:,1:V_ncols] .= A2*V[:,1:V_ncols]
+                mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
             end
 
             A1_tilde_DtH = @async begin
@@ -143,7 +158,7 @@ end
         return spectral_norm
     end
 
-    @fastmath @views function build_and_solve_sylvester!(state_old::State2D, A1::AbstractMatrix, A2::AbstractMatrix, 
+    @views function build_and_solve_sylvester!(state_old::State2D, A1::AbstractMatrix, A2::AbstractMatrix, 
                                         ws::ExtendedKrylovWorkspace2D, U_ncols::Int, V_ncols::Int, 
                                         backend::CUDA_UVM_backend)
 
@@ -191,13 +206,13 @@ end
  
              @async begin
                  wait(A1U_eval)
-                 _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
+                 _, RU = thin_qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
                  R_container[1] = RU
              end
  
              @async begin
                  wait(A2V_eval)
-                 _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
+                 _, RV = thin_qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
                  R_container[2] = RV
              end
  

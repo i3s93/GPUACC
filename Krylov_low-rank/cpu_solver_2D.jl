@@ -149,7 +149,7 @@ solver_params = SolverParameters(max_iter = max_iter, max_rank = max_rank, max_s
 # This interface can probably be simplied a bit by creating an additional data structure
 ws = setup_workspaces(typeof(Vx_old), A1, A2, size(Vx_old), size(Vy_old), max_size, solver_params)
 
-#@code_warntype extended_krylov_step!(state_old, ws, solver_params)
+# @code_warntype extended_krylov_step!(state_old, ws, solver_params)
 
 # Call the Sylvester solver
 @btime begin
