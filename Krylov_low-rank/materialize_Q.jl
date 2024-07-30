@@ -11,7 +11,7 @@ end
     function materialize_Q(Q_factor::T, backend::CUDA_backend) where {T}
         return CuMatrix(Q_factor) 
     end
-    materialize_Q(Q_factor::T, backend::CUDA_UVM_backend) = materialize_Q(Q_factor, CUDA_backend()) where {T}
+    materialize_Q(Q_factor::T, backend::CUDA_UVM_backend) where {T} = materialize_Q(Q_factor, CUDA_backend()) 
 end
 
 

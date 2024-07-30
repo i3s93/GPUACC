@@ -61,20 +61,22 @@ end
 
 @static if @isdefined(CUDA)
 
-    @views function build_and_solve_sylvester!(state_old::State2D, A1::AbstractMatrix, A2::AbstractMatrix, 
-                                        ws::ExtendedKrylovWorkspace2D, U_ncols::Int, V_ncols::Int, backend::CUDA_backend)
+    @views function build_and_solve_sylvester!(state_old::State2D, ws::ExtendedKrylovWorkspace2D, backend::CUDA_backend)
 
         # Unpack the previous low-rank state data
         U_old, S_old, V_old = state_old.U, state_old.S, state_old.V
 
-        # Unpack items from the workspace
-        U, V = ws.U, ws.V    
+        # Unpack some items from the workspace for convenience
+        A1, A2 = ws.A1, ws.A2
+        U, V = ws.U, ws.V
+        U_ncols, V_ncols = ws.U_ncols, ws.V_ncols
+
         S1, A1_tilde, A2_tilde, B1_tilde = ws.S1, ws.A1_tilde, ws.A2_tilde, ws.B1_tilde
         A1U, A2V = ws.A1U, ws.A2V
         block_matrix, residual = ws.block_matrix, ws.residual
 
         # Create a container to hold references to the two R matrices defined locally in the async blocks
-        R_container = CuVector{CuMatrix{eltype(U)}}(undef, 2)
+        R_container = Vector{CuMatrix{eltype(U)}}(undef, 2)
 
         # Compute the coefficients of the Sylvester equation in parallel and copy them using
         # different streams on the device
@@ -89,28 +91,39 @@ end
 
             A1_tilde_DtH = @async begin
                 wait(A1U_eval)
-                copyto!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]'*A1U[:,1:U_ncols])              
-            end
+		A1_tilde[1:U_ncols,1:U_ncols] .= Array(U[:,1:U_ncols]'*A1U[:,1:U_ncols])
+		
+		# This line triggers scalar indexing!
+		#copyto!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]'*A1U[:,1:U_ncols])
+	    end
 
             A2_tilde_DtH = @async begin
                 wait(A2V_eval)
-                copyto!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]'*A2V[:,1:V_ncols])
+		A2_tilde[1:V_ncols,1:V_ncols] .= Array(V[:,1:V_ncols]'*A2V[:,1:V_ncols])
+		
+		# This line triggers scalar indexing!
+		#copyto!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]'*A2V[:,1:V_ncols])
             end
 
             B1_tilde_DtH = @async begin
                 # Here we set the block = B1 (but multiply by -1 later) to reuse memory
-                block_matrix[1:U_ncols,1:V_ncols] = (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
-                copyto!(B1_tilde[1:U_ncols,1:V_ncols], block_matrix[1:U_ncols,1:V_ncols])
-                block_matrix[1:U_ncols,1:V_ncols] .*= -1
+                block_matrix[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
+		B1_tilde[1:U_ncols,1:V_ncols] .= Array(block_matrix[1:U_ncols,1:V_ncols])
+
+		# This line triggers scalar indexing
+		#copyto!(B1_tilde[1:U_ncols,1:V_ncols], block_matrix[1:U_ncols,1:V_ncols])
+		
+                block_matrix[1:U_ncols,1:V_ncols] .*= -1.0
+
             end
 
-            @async begin
+            QR_RU = @async begin
                 wait(A1U_eval)
-                _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
+		_, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
                 R_container[1] = RU
             end
 
-            @async begin
+            QR_RV = @async begin
                 wait(A2V_eval)
                 _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
                 R_container[2] = RV
@@ -123,22 +136,19 @@ end
                 end
 
                 # Solve the Sylvester equation on the CPU and then copy the result back to the GPU
-                S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])  
+                S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])
             end
 
-            @async begin
+            Residual_zero_init = @async begin
                 block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
             end
 
             # The remaining tasks depend on the solution of the Sylvester equation
-            @async begin
+            S1_HtD = @async begin
                 wait(sylvester_solve)
-                copyto!(block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols], S1[1:U_ncols,1:V_ncols])
-            end
-
-            @async begin
-                wait(sylvester_solve)
-                copyto!(block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)], S1[1:U_ncols,1:V_ncols]) 
+		tmp = CuArray(S1[1:U_ncols,1:V_ncols])
+		block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= tmp
+		block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= tmp
             end
         end
 
@@ -152,27 +162,30 @@ end
         residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
 
         # Evaluate the spectral norm of the residual block
-        _, sigma, _ = svd!(residual_block)
-        spectral_norm = sigma[1]
+	tmp = copy(residual_block)
+	_, sigma, _ = svd!(tmp)
+
+        @CUDA.allowscalar spectral_norm = sigma[1]
 
         return spectral_norm
     end
 
-    @views function build_and_solve_sylvester!(state_old::State2D, A1::AbstractMatrix, A2::AbstractMatrix, 
-                                        ws::ExtendedKrylovWorkspace2D, U_ncols::Int, V_ncols::Int, 
-                                        backend::CUDA_UVM_backend)
+    @views function build_and_solve_sylvester!(state_old::State2D, ws::ExtendedKrylovWorkspace2D, backend::CUDA_UVM_backend)
 
         # Unpack the previous low-rank state data
         U_old, S_old, V_old = state_old.U, state_old.S, state_old.V
 
-        # Unpack items from the workspace
+        # Unpack some items from the workspace for convenience
+        A1, A2 = ws.A1, ws.A2
         U, V = ws.U, ws.V
+        U_ncols, V_ncols = ws.U_ncols, ws.V_ncols
+
         S1, A1_tilde, A2_tilde, B1_tilde = ws.S1, ws.A1_tilde, ws.A2_tilde, ws.B1_tilde
         A1U, A2V = ws.A1U, ws.A2V
         block_matrix, residual = ws.block_matrix, ws.residual
 
          # Create a container to hold references to the two R matrices defined locally in the async blocks
-         R_container = CuVector{CuMatrix{eltype(U)}}(undef, 2)
+         R_container = Vector{CuMatrix{eltype(U)}}(undef, 2)
 
          # Compute the coefficients of the Sylvester equation in parallel and copy them using
          # different streams on the device
@@ -252,8 +265,8 @@ end
          residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
  
         # Evaluate the spectral norm of the residual block
-        _, sigma, _ = svd!(residual_block)
-        spectral_norm = sigma[1]
+        sigma = svdvals!(residual_block)
+        @CUDA.allowscalar spectral_norm = sigma[1]
 
         return spectral_norm
     end

@@ -103,7 +103,6 @@ end
 println("Number of BLAS threads:", BLAS.get_num_threads())
 println("BLAS config:", BLAS.get_config())
 
-
 # Setup the domain as well as the differentiation matrices
 # Exclude the first and last endpoints for the boundary conditions
 dx = Lx/(Nx-1)

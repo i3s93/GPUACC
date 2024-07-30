@@ -98,15 +98,20 @@ Performs SVD truncation of the solution. Valid for any workspace and backend.
 Computes the SVD of the dense core and then joins the orthogonal bases with those
 obtained from the Krylov iteration to define a new (truncated) state.
 """
-@views function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
+function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
+    
+    #@printf "Starting SVD truncation.\n" 
     
     # Perform SVD truncation on the dense "core"
-    U_tilde, S_tilde, V_tilde = svd!(ws.S1[1:ws.U_ncols,1:ws.V_ncols])
+    # S1 is actually on the host... FIX THIS
+    tmp = CuArray(ws.S1[1:ws.U_ncols,1:ws.V_ncols])
+    U_tilde, S_tilde, V_tilde = svd!(tmp)
 
     # Here S_tilde is a vector, so we do this before
     # we promote S_tilde to a diagonal matrix
     # We can exploit the fact that S_tilde is ordered (descending)
-    r_new = sum(S_tilde .> params.rel_tol*S_tilde[1])
+    CUDA.@allowscalar threshold = params.rel_tol*S_tilde[1]
+    r_new = sum(S_tilde .> threshold)
     r_new = min(r_new, params.max_rank)
 
     # Define the new diagonal "core" tensor
@@ -114,11 +119,33 @@ obtained from the Krylov iteration to define a new (truncated) state.
     S_new = Diagonal(S_tilde[1:r_new])
 
     # Join the orthogonal bases from the QR and SVD steps
-    U_new = ws.U[:,1:ws.U_ncols]*U_tilde[1:ws.U_ncols,1:r_new]
-    V_new = ws.V[:,1:ws.V_ncols]*V_tilde[1:ws.V_ncols,1:r_new]
+    #tmp_U = copy(ws.U[:,1:ws.U_ncols])
+    #tmp_U_tilde = copy(U_tilde[:,1:r_new])
+
+    #tmp_V = copy(ws.V[:,1:ws.V_ncols])
+    #tmp_V_tilde = copy(V_tilde[:,1:r_new])
+
+    #U_new = tmp_U * tmp_U_tilde
+    #V_new = tmp_V * tmp_V_tilde
+
+
+
+    U_new = CuArray{Float64}(undef, size(ws.U,1), r_new)
+    V_new = CuArray{Float64}(undef, size(ws.V,1), r_new)
+    mul!(U_new[:,1:r_new], ws.U[:,1:ws.U_ncols], U_tilde[:,1:r_new])
+    mul!(V_new[:,1:r_new], ws.V[:,1:ws.V_ncols], V_tilde[:,1:r_new])
+
+
+    # These lines generate scalar indexing....
+    #U_new = ws.U[:,1:ws.U_ncols]*U_tilde[:,1:r_new]
+    #V_new = ws.V[:,1:ws.V_ncols]*V_tilde[:,1:r_new]
+
+    #@printf "Set U_new and V_new.\n"
 
     # Create the truncated low-rank state
     state_new = State2D(U_new, S_new, V_new, r_new)
+
+    #@printf "Set the new state.\n"
 
     return state_new
 end
