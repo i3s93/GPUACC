@@ -214,9 +214,11 @@ a method suitable for the given backend and structure of A1 and A2. These are on
 Krylov methods.
 """
 function compute_LU_factorizations!(ws::ExtendedKrylovWorkspace2D)
-    
-    ws.FA1 = lu(ws.A1)
-    ws.FA2 = lu(ws.A2)
+
+    @sync begin
+        Threads.@spawn ws.FA1 = lu(ws.A1) 
+        Threads.@spawn ws.FA2 = lu(ws.A2)
+    end
 
     return nothing
 end

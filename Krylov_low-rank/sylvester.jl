@@ -17,40 +17,87 @@ Solves the continuous Sylvester equation on the CPU.
     A1U, A2V = ws.A1U, ws.A2V
     block_matrix, residual = ws.block_matrix, ws.residual
 
-    # Build and solve the reduced system using the Sylvester solver
-    mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
-    mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
- 
-    mul!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]', A1U[:,1:U_ncols])
-    mul!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]', A2V[:,1:V_ncols])
-
     # Temporaries for evaluating B1_tilde
-    # B1_tilde[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
-    # TO-DO: Eliminate these allocations from this function and put them in the workspace
     tmp1 = similar(B1_tilde, U_ncols, size(U_old,2))
     tmp2 = similar(B1_tilde, size(V_old,2), V_ncols)
     tmp3 = similar(B1_tilde, U_ncols, size(S_old,2))
 
-    mul!(tmp1, U[:,1:U_ncols]', U_old[:,:])
-    mul!(tmp2, V_old[:,:]', V[:,1:V_ncols])
-    mul!(tmp3, tmp1, S_old)
-    mul!(B1_tilde[1:U_ncols,1:V_ncols], tmp3, tmp2)
+    # Create a container to hold references to the two R matrices defined locally in the async blocks
+    R_container = Vector{Matrix{eltype(U)}}(undef, 2)
 
-    S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])
+    # Build and solve the reduced system using the Sylvester solver
+    @sync begin
+        A1U_eval = Threads.@spawn mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
 
-    # Check convergence of the solver using the spectral norm of the residual
-    # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
-    _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
-    _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
+        A2V_eval = Threads.@spawn mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
+        
+        A1_tilde_eval = Threads.@spawn begin
+            wait(A1U_eval)
+            mul!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]', A1U[:,1:U_ncols])
+        end
 
-    # Build the blocks of the matrix [-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]
-    block_matrix[1:U_ncols,1:V_ncols] .= -B1_tilde[1:U_ncols,1:V_ncols]
-    block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= S1[1:U_ncols,1:V_ncols]
-    block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= S1[1:U_ncols,1:V_ncols]
-    block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
+        A2_tilde_eval = Threads.@spawn begin
+            wait(A2V_eval)
+            mul!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]', A2V[:,1:V_ncols])
+        end
+
+        tmp1_eval = Threads.@spawn mul!(tmp1, U[:,1:U_ncols]', U_old[:,:])
+        tmp2_eval = Threads.@spawn mul!(tmp2, V_old[:,:]', V[:,1:V_ncols])
+        
+        tmp3_eval = Threads.@spawn begin
+            wait(tmp1_eval)
+            mul!(tmp3, tmp1, S_old)
+        end
+
+        B1_tilde_eval = Threads.@spawn begin
+            for task in [tmp2_eval, tmp3_eval]
+                wait(task)
+            end
+            mul!(B1_tilde[1:U_ncols,1:V_ncols], tmp3, tmp2)
+        end
+
+        Threads.@spawn begin
+            wait(A1U_eval)
+            _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
+            R_container[1] = RU
+        end
+
+        Threads.@spawn begin
+            wait(A2V_eval)
+            _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
+            R_container[2] = RV
+        end
+
+        sylvester_solve = Threads.@spawn begin
+            # The Sylvester solve cannot be performed until all coefficients are available
+            for task in [A1_tilde_eval, A2_tilde_eval, B1_tilde_eval]
+                wait(task)
+            end
+
+            S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])
+        end
+
+        # Zero block in the residual
+        Threads.@spawn block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
+
+        Threads.@spawn begin
+            wait(B1_tilde_eval)
+            block_matrix[1:U_ncols,1:V_ncols] .= -B1_tilde[1:U_ncols,1:V_ncols]
+        end
+
+        # Off diagonal blocks in the residual
+        Threads.@spawn begin
+            wait(sylvester_solve)
+            block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= S1[1:U_ncols,1:V_ncols]
+            block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= S1[1:U_ncols,1:V_ncols]
+        end
+    end
+
+    # Access the triangular matrices from the QR factorizations
+    RU = R_container[1]
+    RV = R_container[2]
 
     # Create a reference to the relevant block of the residual
-    # TO-DO: Remove the memory allocations here by using temporaries
     residual_block = residual[1:size(RU,1),1:size(RV,2)]
     residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
 
@@ -81,55 +128,39 @@ end
         # Compute the coefficients of the Sylvester equation in parallel and copy them using
         # different streams on the device
         @sync begin
-            A1U_eval = @async begin
-                mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
-            end
-            
-            A2V_eval = @async begin
-                mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
-            end
+            A1U_eval = Threads.@spawn mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
+            A2V_eval = Threads.@spawn mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
 
-            A1_tilde_DtH = @async begin
+            A1_tilde_DtH = Threads.@spawn begin
                 wait(A1U_eval)
-		A1_tilde[1:U_ncols,1:U_ncols] .= Array(U[:,1:U_ncols]'*A1U[:,1:U_ncols])
-		
-		# This line triggers scalar indexing!
-		#copyto!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]'*A1U[:,1:U_ncols])
-	    end
+		        A1_tilde[1:U_ncols,1:U_ncols] .= Array(U[:,1:U_ncols]'*A1U[:,1:U_ncols])
+	        end
 
-            A2_tilde_DtH = @async begin
+            A2_tilde_DtH = Threads.@spawn begin
                 wait(A2V_eval)
-		A2_tilde[1:V_ncols,1:V_ncols] .= Array(V[:,1:V_ncols]'*A2V[:,1:V_ncols])
-		
-		# This line triggers scalar indexing!
-		#copyto!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]'*A2V[:,1:V_ncols])
+		        A2_tilde[1:V_ncols,1:V_ncols] .= Array(V[:,1:V_ncols]'*A2V[:,1:V_ncols])
             end
 
-            B1_tilde_DtH = @async begin
+            B1_tilde_DtH = Threads.@spawn begin
                 # Here we set the block = B1 (but multiply by -1 later) to reuse memory
                 block_matrix[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
-		B1_tilde[1:U_ncols,1:V_ncols] .= Array(block_matrix[1:U_ncols,1:V_ncols])
-
-		# This line triggers scalar indexing
-		#copyto!(B1_tilde[1:U_ncols,1:V_ncols], block_matrix[1:U_ncols,1:V_ncols])
-		
+		        B1_tilde[1:U_ncols,1:V_ncols] .= Array(block_matrix[1:U_ncols,1:V_ncols])
                 block_matrix[1:U_ncols,1:V_ncols] .*= -1.0
-
             end
 
-            QR_RU = @async begin
+            Threads.@spawn begin
                 wait(A1U_eval)
-		_, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
+		        _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
                 R_container[1] = RU
             end
 
-            QR_RV = @async begin
+            Threads.@spawn begin
                 wait(A2V_eval)
                 _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
                 R_container[2] = RV
             end
 
-            sylvester_solve = @async begin
+            sylvester_solve = Threads.@spawn begin
                 # The Sylvester solve cannot be performed until all copies are completed
                 for task in [A1_tilde_DtH, A2_tilde_DtH, B1_tilde_DtH]
                     wait(task)
@@ -139,16 +170,14 @@ end
                 S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])
             end
 
-            Residual_zero_init = @async begin
-                block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
-            end
+            Threads.@spawn block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
 
             # The remaining tasks depend on the solution of the Sylvester equation
-            S1_HtD = @async begin
+            Threads.@spawn begin
                 wait(sylvester_solve)
-		tmp = CuArray(S1[1:U_ncols,1:V_ncols])
-		block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= tmp
-		block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= tmp
+		        S1_d = CuArray(S1[1:U_ncols,1:V_ncols])
+		        block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= S1_d
+		        block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= S1_d
             end
         end
 
@@ -162,9 +191,7 @@ end
         residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
 
         # Evaluate the spectral norm of the residual block
-	tmp = copy(residual_block)
-	_, sigma, _ = svd!(tmp)
-
+        sigma = svdvals!(residual_block)
         @CUDA.allowscalar spectral_norm = sigma[1]
 
         return spectral_norm
@@ -190,67 +217,59 @@ end
          # Compute the coefficients of the Sylvester equation in parallel and copy them using
          # different streams on the device
          @sync begin
-            A1U_eval = @async begin
-                mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
-            end
-            
-            A2V_eval = @async begin
-                mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
-            end
+            A1U_eval = Threads.@spawn mul!(A1U[:,1:U_ncols], A1, U[:,1:U_ncols])
+            A2V_eval = Threads.@spawn mul!(A2V[:,1:V_ncols], A2, V[:,1:V_ncols])
  
-             A1_tilde_DtH = @async begin
+             A1_tilde_DtH = Threads.@spawn begin
                 A1_tilde = unsafe_wrap(CuArray, A1_tilde)
                 mul!(A1_tilde[1:U_ncols,1:U_ncols], U[:,1:U_ncols]', A1U[:,1:U_ncols])
                 A1_tilde = unsafe_wrap(Array, A1_tilde)              
              end
  
-             A2_tilde_DtH = @async begin
+             A2_tilde_DtH = Threads.@spawn begin
                 A2_tilde = unsafe_wrap(CuArray, A2_tilde)
                 mul!(A2_tilde[1:V_ncols,1:V_ncols], V[:,1:V_ncols]', A2V[:,1:V_ncols])
                 A2_tilde = unsafe_wrap(Array, A2_tilde)  
              end
  
-             B1_tilde_DtH = @async begin
+             B1_tilde_DtH = Threads.@spawn begin
                 B1_tilde = unsafe_wrap(CuArray, B1_tilde)
                 B1_tilde[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])
                 block_matrix[1:U_ncols,1:V_ncols] .= -B1_tilde[1:U_ncols,1:V_ncols]
                 B1_tilde = unsafe_wrap(Array, B1_tilde) 
              end
  
-             @async begin
+             Threads.@spawn begin
                  wait(A1U_eval)
                  _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
                  R_container[1] = RU
              end
  
-             @async begin
+             Threads.@spawn begin
                  wait(A2V_eval)
                  _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
                  R_container[2] = RV
              end
  
-             sylvester_solve = @async begin
+             sylvester_solve = Threads.@spawn begin
                  # The Sylvester solve cannot be performed until all copies are completed
                  for task in [A1_tilde_DtH, A2_tilde_DtH, B1_tilde_DtH]
                      wait(task)
                  end
- 
+
+                 S1 = unsafe_wrap(Array, S1)
+                 
                  # Solve the Sylvester equation on the CPU and then copy the result back to the GPU
                  S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])  
              end
  
-             @async begin
-                 block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
-             end
+             Threads.@spawn block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
  
              # The remaining tasks depend on the solution of the Sylvester equation
-             @async begin
+             Threads.@spawn begin
                  wait(sylvester_solve)
+                 S1 = unsafe_wrap(CuArray, S1)
                  copyto!(block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols], S1[1:U_ncols,1:V_ncols])
-             end
- 
-             @async begin
-                 wait(sylvester_solve)
                  copyto!(block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)], S1[1:U_ncols,1:V_ncols]) 
              end
          end

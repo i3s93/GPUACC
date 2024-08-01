@@ -4,7 +4,6 @@ include("SolverParameters.jl")
 
 include("materialize_Q.jl")
 
-# TO-DO: These functions should be written using tasks
 
 """
 Function to initialize the bases in the Krylov method. This method is applied prior to the Krylov iteration.
@@ -15,14 +14,16 @@ Function to initialize the bases in the Krylov method. This method is applied pr
     ws.U_ncols = size(state_in.U,2)
     ws.V_ncols = size(state_in.V,2)
 
-    ws.U[:,1:ws.U_ncols] .= state_in.U[:,:]
-    ws.V[:,1:ws.V_ncols] .= state_in.V[:,:]
+    @sync begin
+        Threads.@spawn ws.U[:,1:ws.U_ncols] .= state_in.U[:,:]
+        Threads.@spawn ws.V[:,1:ws.V_ncols] .= state_in.V[:,:]
 
-    ws.A1U_prev .= state_in.U[:,:]
-    ws.A2V_prev .= state_in.V[:,:]
+        Threads.@spawn ws.A1U_prev .= state_in.U[:,:]
+        Threads.@spawn ws.A2V_prev .= state_in.V[:,:]
 
-    ws.inv_A1U_prev .= state_in.U[:,:]
-    ws.inv_A2V_prev .= state_in.V[:,:]
+        Threads.@spawn ws.inv_A1U_prev .= state_in.U[:,:]
+        Threads.@spawn ws.inv_A2V_prev .= state_in.V[:,:]
+    end
 
     return nothing
 end
@@ -43,11 +44,13 @@ Helper function that calculates the candidate bases during the Krylov iteration.
 """
 function update_bases!(ws::ExtendedKrylovWorkspace2D)
 
-    mul!(ws.A1U_curr, ws.A1, ws.A1U_prev)
-    ldiv!(ws.inv_A1U_curr, ws.FA1, ws.inv_A1U_prev)
-
-    mul!(ws.A2V_curr, ws.A2, ws.A2V_prev)
-    ldiv!(ws.inv_A2V_curr, ws.FA2, ws.inv_A2V_prev)
+    # Compute the candidate bases for the Krylov interation independently
+    @sync begin
+        Threads.@spawn mul!(ws.A1U_curr, ws.A1, ws.A1U_prev)
+        Threads.@spawn ldiv!(ws.inv_A1U_curr, ws.FA1, ws.inv_A1U_prev)
+        Threads.@spawn mul!(ws.A2V_curr, ws.A2, ws.A2V_prev)
+        Threads.@spawn ldiv!(ws.inv_A2V_curr, ws.FA2, ws.inv_A2V_prev)
+    end
 
     return nothing
 end
@@ -57,22 +60,24 @@ Helper function that applies QR factorization to orthogonalize the bases.
 """
 @views function orthogonalize_bases!(ws::ExtendedKrylovWorkspace2D, backend::Backend)
 
-    U_aug = hcat(ws.U[:,1:ws.U_ncols], ws.A1U_curr, ws.inv_A1U_curr)
-    V_aug = hcat(ws.V[:,1:ws.V_ncols], ws.A2V_curr, ws.inv_A2V_curr)
+    # Augment and apply QR factorization to the bases in each dimension independently
+    @sync begin
+        Threads.@spawn begin
+            U_aug = hcat(ws.U[:,1:ws.U_ncols], ws.A1U_curr, ws.inv_A1U_curr)
+            Q_U, _ = qr!(U_aug)
+            Q_U = materialize_Q(Q_U, backend)
+            ws.U_ncols = size(Q_U,2)
+            ws.U[:,1:ws.U_ncols] .= Q_U[:,:]
+        end
 
-    # Orthogonalize the augmented bases (ignore the coefficients in R)
-    Q_U, _ = qr!(U_aug)
-    Q_V, _ = qr!(V_aug)
-
-    Q_U = materialize_Q(Q_U, backend)
-    Q_V = materialize_Q(Q_V, backend)
-
-    # Update the current sizes of the bases and transfer accordingly
-    ws.U_ncols = size(Q_U,2)
-    ws.V_ncols = size(Q_V,2)
-
-    ws.U[:,1:ws.U_ncols] .= Q_U[:,:]
-    ws.V[:,1:ws.V_ncols] .= Q_V[:,:]
+        Threads.@spawn begin
+            V_aug = hcat(ws.V[:,1:ws.V_ncols], ws.A2V_curr, ws.inv_A2V_curr)
+            Q_V, _ = qr!(V_aug)
+            Q_V = materialize_Q(Q_V, backend)
+            ws.V_ncols = size(Q_V,2)
+            ws.V[:,1:ws.V_ncols] .= Q_V[:,:]
+        end
+    end
 
     return nothing
 end
@@ -83,11 +88,13 @@ Helper function to swap the buffers for the Krylov iteration.
 function shuffle_iterates!(ws::ExtendedKrylovWorkspace2D)
 
     # Current values become previous in the next iteration
-    ws.A1U_prev .= ws.A1U_curr
-    ws.inv_A1U_prev .= ws.inv_A1U_curr
+    @sync begin
+        Threads.@spawn ws.A1U_prev .= ws.A1U_curr
+        Threads.@spawn ws.inv_A1U_prev .= ws.inv_A1U_curr
 
-    ws.A2V_prev .= ws.A2V_curr
-    ws.inv_A2V_prev .= ws.inv_A2V_curr
+        Threads.@spawn ws.A2V_prev .= ws.A2V_curr
+        Threads.@spawn ws.inv_A2V_prev .= ws.inv_A2V_curr        
+    end
 
     return nothing
 end
@@ -98,55 +105,58 @@ Performs SVD truncation of the solution. Valid for any workspace and backend.
 Computes the SVD of the dense core and then joins the orthogonal bases with those
 obtained from the Krylov iteration to define a new (truncated) state.
 """
-function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
+@views function apply_svd_truncation!(ws::AbstractWorkspace, params::SolverParameters)
     
-    #@printf "Starting SVD truncation.\n" 
+    # Extract some parameters from the input struct
+    max_rank, rel_tol, backend = params.max_rank, params.rel_tol, params.backend
     
-    # Perform SVD truncation on the dense "core"
-    # S1 is actually on the host... FIX THIS
-    tmp = CuArray(ws.S1[1:ws.U_ncols,1:ws.V_ncols])
-    U_tilde, S_tilde, V_tilde = svd!(tmp)
+    # Perform SVD truncation on the dense matrix S1
+    # Here we avoid the copy from host to device by reusing a
+    # component from the residual evaluation.
+    S1 = copy(ws.block_matrix[ws.U_ncols .+ (1:ws.U_ncols),1:ws.V_ncols])
+    U_tilde, S_tilde, V_tilde = svd!(S1)
 
-    # Here S_tilde is a vector, so we do this before
-    # we promote S_tilde to a diagonal matrix
-    # We can exploit the fact that S_tilde is ordered (descending)
-    CUDA.@allowscalar threshold = params.rel_tol*S_tilde[1]
+    # We exploit the fact that the vector S_tilde is ordered (descending)
+    threshold = get_threshold(S_tilde, rel_tol, backend)
     r_new = sum(S_tilde .> threshold)
-    r_new = min(r_new, params.max_rank)
+    r_new = min(r_new, max_rank)
 
-    # Define the new diagonal "core" tensor
-    # Does this work for CuArrays as well???
+    U_new = similar(ws.U, size(ws.U,1), r_new)
     S_new = Diagonal(S_tilde[1:r_new])
+    V_new = similar(ws.V, size(ws.V,1), r_new)
 
     # Join the orthogonal bases from the QR and SVD steps
-    #tmp_U = copy(ws.U[:,1:ws.U_ncols])
-    #tmp_U_tilde = copy(U_tilde[:,1:r_new])
-
-    #tmp_V = copy(ws.V[:,1:ws.V_ncols])
-    #tmp_V_tilde = copy(V_tilde[:,1:r_new])
-
-    #U_new = tmp_U * tmp_U_tilde
-    #V_new = tmp_V * tmp_V_tilde
-
-
-
-    U_new = CuArray{Float64}(undef, size(ws.U,1), r_new)
-    V_new = CuArray{Float64}(undef, size(ws.V,1), r_new)
-    mul!(U_new[:,1:r_new], ws.U[:,1:ws.U_ncols], U_tilde[:,1:r_new])
-    mul!(V_new[:,1:r_new], ws.V[:,1:ws.V_ncols], V_tilde[:,1:r_new])
-
-
-    # These lines generate scalar indexing....
-    #U_new = ws.U[:,1:ws.U_ncols]*U_tilde[:,1:r_new]
-    #V_new = ws.V[:,1:ws.V_ncols]*V_tilde[:,1:r_new]
-
-    #@printf "Set U_new and V_new.\n"
+    @sync begin
+        Threads.@spawn mul!(U_new, ws.U[:,1:ws.U_ncols], U_tilde[:,1:r_new])
+        Threads.@spawn mul!(V_new, ws.V[:,1:ws.V_ncols], V_tilde[:,1:r_new])
+    end
 
     # Create the truncated low-rank state
     state_new = State2D(U_new, S_new, V_new, r_new)
 
-    #@printf "Set the new state.\n"
-
     return state_new
+end
+
+"""
+Computes the threshold for the termination of the iterative scheme. The threshold is defined
+according to the spectral norm of a given state. Note that we absorb the term representing the
+denominator in the tolerance. 
+"""
+@inline function get_threshold(S::AbstractVector, rel_tol::Real, backend::CPU_backend)::Real
+    return S[1]*rel_tol
+end
+
+@inline function get_threshold(S::AbstractMatrix, rel_tol::Real, backend::CPU_backend)::Real
+    return S[1,1]*rel_tol
+end
+
+@static if @isdefined(CUDA)
+    @inline function get_threshold(S::AbstractVector, rel_tol::Real, backend::Union{CUDA_backend, CUDA_UVM_backend})
+        return CUDA.@allowscalar S[1]*rel_tol
+    end
+
+    @inline function get_threshold(S::AbstractMatrix, rel_tol::Real, backend::Union{CUDA_backend, CUDA_UVM_backend})
+        return CUDA.@allowscalar S[1,1]*rel_tol
+    end
 end
 

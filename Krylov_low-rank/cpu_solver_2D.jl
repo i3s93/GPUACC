@@ -81,8 +81,8 @@ using SparseArrays
 using MatrixEquations
 
 using InteractiveUtils
-using Profile
-using ProfileView
+# using Profile
+# using ProfileView
 
 include("SolverParameters.jl")
 include("State.jl")
@@ -101,7 +101,6 @@ end
 # Get the number of BLAS threads and check the configuration
 println("Number of BLAS threads:", BLAS.get_num_threads())
 println("BLAS config:", BLAS.get_config())
-
 
 # Setup the domain as well as the differentiation matrices
 # Exclude the first and last endpoints for the boundary conditions
@@ -149,11 +148,35 @@ solver_params = SolverParameters(max_iter = max_iter, max_rank = max_rank, max_s
 # This interface can probably be simplied a bit by creating an additional data structure
 ws = setup_workspaces(typeof(Vx_old), A1, A2, size(Vx_old), size(Vy_old), max_size, solver_params)
 
-# @code_warntype extended_krylov_step!(state_old, ws, solver_params)
+#@code_warntype extended_krylov_step!(state_old, ws, solver_params)
 
 # Call the Sylvester solver
 @btime begin
     state_new, iter = extended_krylov_step!(state_old, ws, solver_params)    
 end
+
+# # Profiling (code is assumed to already be compiled)
+# # Initialize the profiler with a smaller sampling interval
+# Profile.init()  # delay in seconds
+
+# ProfileView.@profview begin
+#     for iter = 1:50
+#         extended_krylov_step!(state_old, ws, solver_params)
+#     end
+# end 
+
+# # Profiling (code is assumed to already be compiled)
+# # Initialize the profiler with a smaller sampling interval
+# Profile.init()  # delay in seconds
+
+# @profile begin
+#     for iter = 1:1
+#         extended_krylov_step!(state_old, ws, solver_params)
+#     end
+# end
+
+# open("./profile_data.txt", "w") do s
+#     Profile.print(C = false, IOContext(s, :displaysize => (24, 500)))
+# end
 
 
