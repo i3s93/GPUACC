@@ -66,8 +66,8 @@ using SparseArrays
 using MatrixEquations
 
 using InteractiveUtils
-using Profile
-using ProfileView
+#using Profile
+#using ProfileView
 
 """
 Helper function to create the 2D grid

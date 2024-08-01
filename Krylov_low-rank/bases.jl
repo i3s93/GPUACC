@@ -126,9 +126,14 @@ obtained from the Krylov iteration to define a new (truncated) state.
     V_new = similar(ws.V, size(ws.V,1), r_new)
 
     # Join the orthogonal bases from the QR and SVD steps
+    #@sync begin
+    #    CUDA.@allowscalar Threads.@spawn mul!(U_new, ws.U[:,1:ws.U_ncols], U_tilde[:,1:r_new])
+    #    CUDA.@allowscalar Threads.@spawn mul!(V_new, ws.V[:,1:ws.V_ncols], V_tilde[:,1:r_new])
+    #end
+
     @sync begin
-        Threads.@spawn mul!(U_new, ws.U[:,1:ws.U_ncols], U_tilde[:,1:r_new])
-        Threads.@spawn mul!(V_new, ws.V[:,1:ws.V_ncols], V_tilde[:,1:r_new])
+	Threads.@spawn U_new[:,:] .= copy(ws.U[:,1:ws.U_ncols]) * copy(U_tilde[:,1:r_new])
+	Threads.@spawn V_new[:,:] .= copy(ws.V[:,1:ws.V_ncols]) * copy(V_tilde[:,1:r_new])
     end
 
     # Create the truncated low-rank state

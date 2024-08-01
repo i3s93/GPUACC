@@ -191,7 +191,8 @@ end
         residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
 
         # Evaluate the spectral norm of the residual block
-        sigma = svdvals!(residual_block)
+	tmp = copy(residual_block)
+        sigma = svdvals!(tmp)
         @CUDA.allowscalar spectral_norm = sigma[1]
 
         return spectral_norm
@@ -284,7 +285,8 @@ end
          residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
  
         # Evaluate the spectral norm of the residual block
-        sigma = svdvals!(residual_block)
+	tmp = copy(residual_block)
+        sigma = svdvals!(tmp)
         @CUDA.allowscalar spectral_norm = sigma[1]
 
         return spectral_norm
