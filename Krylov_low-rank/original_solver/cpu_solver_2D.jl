@@ -23,10 +23,18 @@ settings = ArgParseSettings()
         help = "Number grid points in y";
         arg_type = Int
         default = 101
-    "--rel_eps"
+    "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
         arg_type = Float64
         default = 1.0e-3
+    "--max_rank"
+        help = "Maximum rank used in the representation of the function."
+        arg_type = Int
+        default = 32
+    "--max_iter"
+        help = "Maximum number of Krylov iterations"
+        arg_type = Int
+        default = 10
     "--use_mkl"
         help = "Use the Intel Math Kernel Library rather than OpenBLAS"
         arg_type = Bool
@@ -46,7 +54,9 @@ Lx = parsed_args["Lx"]
 Ly = parsed_args["Ly"]
 Nx = parsed_args["Nx"]
 Ny = parsed_args["Ny"]
-rel_eps = parsed_args["rel_eps"]
+rel_tol = parsed_args["rel_tol"]
+max_rank = parsed_args["max_rank"]
+max_iter = parsed_args["max_iter"]
 use_mkl = parsed_args["use_mkl"]
 
 import Base: find_package
@@ -97,13 +107,12 @@ The iteration terminates early provided the following condition is satisfied:
 This quantity is measured by projecting onto the low-dimensional subspaces to reduce the
 complexity of its formation. We use the spectral norm here.
 """
-@fastmath @views function extended_krylov_step(U_old::AbstractMatrix, V_old::AbstractMatrix, S_old::AbstractMatrix, 
-                                             A1::AbstractMatrix, A2::AbstractMatrix, 
-                                             rel_eps::Real, max_iter::Int, max_rank::Int, max_size::Int = 256)
+const FullOrSparseMatrix = Union{Matrix{Float64},SparseMatrixCSC{Float64, Int64}}
+const FullOrDiagonalMatrix = Union{Matrix{Float64}, Diagonal{Float64, Vector{Float64}}}
 
-    # Number of columns used in the updated bases (changes across iterations)
-    U_ncols = size(U_old,2)
-    V_ncols = size(V_old,2)
+@fastmath @views function extended_krylov_step_cpu(U_old::Matrix{Float64}, V_old::Matrix{Float64}, S_old::FullOrDiagonalMatrix, 
+                                  A1::FullOrSparseMatrix, A2::FullOrSparseMatrix, 
+                                  rel_eps::Float64, max_iter::Int, max_rank::Int)
 
     # Tolerance for the construction of the Krylov basis
     threshold = opnorm(S_old,2)*rel_eps
@@ -112,36 +121,24 @@ complexity of its formation. We use the spectral norm here.
     FA1 = lu(A1)
     FA2 = lu(A2)
 
-    # Storage for the Krylov bases
-    U = similar(U_old, size(U_old,1), max_size)
-    V = similar(V_old, size(V_old,1), max_size)
-    U[:,1:U_ncols] .= U_old[:,1:U_ncols]
-    V[:,1:V_ncols] .= V_old[:,1:U_ncols]
+    # Initialize the Krylov bases
+    U = copy(U_old)
+    V = copy(V_old)
 
     # Storage for A1^{k}U and A2^{k}V for two iterates
     A1U_prev = copy(U_old)
     A2V_prev = copy(V_old)
-    A1U_curr = similar(U_old)
-    A2V_curr = similar(V_old)
+    A1U_curr = Matrix{Float64}(undef, size(U_old))
+    A2V_curr = Matrix{Float64}(undef, size(V_old))
 
     # Storage for A1^{-k}U and A2^{-k}V for two iterates
     inv_A1U_prev = copy(U_old)
     inv_A2V_prev = copy(V_old)
-    inv_A1U_curr = similar(U_old)
-    inv_A2V_curr = similar(V_old)
+    inv_A1U_curr = Matrix{Float64}(undef, size(U_old))
+    inv_A2V_curr = Matrix{Float64}(undef, size(V_old))
 
-    # Storage for the solution of the reduced Sylvester equation
-    S1 = similar(S_old, max_size, max_size) 
-    A1_tilde = similar(U_old, max_size, max_size)
-    A2_tilde = similar(U_old, max_size, max_size)
-    B1_tilde = similar(U_old, max_size, max_size)
-
-    # Preallocate and initialize the data for the evaluation of the residual
-    A1U = similar(U_old, size(U_old,1), max_size)
-    A2V = similar(V_old, size(V_old,1), max_size)
-
-    block_matrix = similar(U_old, max_size, max_size)
-    residual = similar(U_old, max_size, max_size)
+    # Initialize S1 here to extend its scope
+    S1 = Matrix{Float64}(undef, size(S_old))
 
     # Variables to track during construction of the Krylov subspaces
     converged = false
@@ -150,56 +147,37 @@ complexity of its formation. We use the spectral norm here.
     for iter_count = 1:max_iter
 
         # Extended Krylov bases and concatenate with the existing bases
-        #
-        # TO-DO: Define "batched" versions of these triangular solves for
-        # the inverse operation so they can be performed concurrently
         mul!(A1U_curr, A1, A1U_prev)
         ldiv!(inv_A1U_curr, FA1, inv_A1U_prev)
 
         mul!(A2V_curr, A2, A2V_prev)
         ldiv!(inv_A2V_curr, FA2, inv_A2V_prev)
 
-        U_aug = hcat(U[:,1:U_ncols], A1U_curr, inv_A1U_curr)
-        V_aug = hcat(V[:,1:V_ncols], A2V_curr, inv_A2V_curr)
-
         # Orthogonalize the augmented bases
-        # Note that we don't explicitly need to cast to the appropriate type
-        # when we transfer the bases
-        F_U = qr!(U_aug)
-        F_V = qr!(V_aug)
+        F_U = qr!(hcat(U, A1U_curr, inv_A1U_curr))
+        F_V = qr!(hcat(V, A2V_curr, inv_A2V_curr))
 
-        # Get the current sizes of the bases and transfer accordingly
-        U_ncols = size(F_U,2)
-        V_ncols = size(F_V,2)
-
-        U[:,1:U_ncols] .= F_U.Q[:,1:U_ncols]
-        V[:,1:V_ncols] .= F_V.Q[:,1:V_ncols]
+        U = Matrix(F_U.Q)
+        V = Matrix(F_V.Q)
 
         # Build and solve the reduced system using the Sylvester solver
-        A1U[:,1:U_ncols] .= A1*U[:,1:U_ncols]
-        A2V[:,1:V_ncols] .= A2*V[:,1:V_ncols]
+        A1U = A1*U
+        A2V = A2*V
 
-        A1_tilde[1:U_ncols,1:U_ncols] .= U[:,1:U_ncols]'*A1U[:,1:U_ncols]
-        A2_tilde[1:V_ncols,1:V_ncols] .= V[:,1:V_ncols]'*A2V[:,1:V_ncols]
-        B1_tilde[1:U_ncols,1:V_ncols] .= (U[:,1:U_ncols]'*U_old[:,:])*S_old[:,:]*(V_old[:,:]'*V[:,1:V_ncols])        
-        S1[1:U_ncols,1:V_ncols] .= sylvc(A1_tilde[1:U_ncols,1:U_ncols], A2_tilde[1:V_ncols,1:V_ncols], B1_tilde[1:U_ncols,1:V_ncols])
+        A1_tilde = U'*A1U
+        A2_tilde = V'*A2V
+        B1_tilde = (U'*U_old)*S_old*(V_old'*V)
+        S1 = sylvc(A1_tilde, A2_tilde, B1_tilde)
 
         # Check convergence of the solver using the spectral norm of the residual
         # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
-        _, RU = qr!(hcat(U[:,1:U_ncols], A1U[:,1:U_ncols]))
-        _, RV = qr!(hcat(V[:,1:V_ncols], A2V[:,1:V_ncols]))
+        _, RU = qr!(hcat(U, A1U))
+        _, RV = qr!(hcat(V, A2V))
 
         # Build the blocks of the matrix [-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]
-        block_matrix[1:U_ncols,1:V_ncols] .= -B1_tilde[1:U_ncols,1:V_ncols]
-        block_matrix[U_ncols .+ (1:U_ncols),1:V_ncols] .= S1[1:U_ncols,1:V_ncols]
-        block_matrix[1:U_ncols,V_ncols .+ (1:V_ncols)] .= S1[1:U_ncols,1:V_ncols]
-        block_matrix[U_ncols .+ (1:U_ncols),V_ncols .+ (1:V_ncols)] .= 0.0
+        residual = RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
 
-        # Create a reference to the relevant block of the residual
-        residual_block = residual[1:size(RU,1),1:size(RV,2)]
-        residual_block .= RU[:,:]*block_matrix[1:(2*U_ncols),1:(2*V_ncols)]*RV[:,:]'
-
-        if opnorm(residual_block,2) < threshold
+        if opnorm(residual,2) < threshold
             num_iterations = iter_count
             converged = true
             break
@@ -214,7 +192,7 @@ complexity of its formation. We use the spectral norm here.
     end
 
     # Perform SVD truncation on the dense solution tensor
-    U_tilde, S_tilde, V_tilde = svd!(S1[1:U_ncols,1:V_ncols])
+    U_tilde, S_tilde, V_tilde = svd!(S1)
 
     # Here S_tilde is a vector, so we do this before
     # we promote S_tilde to a diagonal matrix
@@ -226,8 +204,8 @@ complexity of its formation. We use the spectral norm here.
     S_new = Diagonal(S_tilde[1:r])
 
     # Join the orthogonal bases from the QR and SVD steps
-    U_new = U[:,1:U_ncols]*U_tilde[1:U_ncols,1:r]
-    V_new = V[:,1:V_ncols]*V_tilde[1:V_ncols,1:r]
+    U_new = U*U_tilde
+    V_new = V*V_tilde
 
     return U_new, V_new, S_new, num_iterations
 
@@ -256,40 +234,34 @@ Dyy = Dxx
 dtn = 1.0e-2           # Time step size
 d1 = 0.5               # Diffusion coefficient for ddx
 d2 = 0.5               # Diffusion coefficient for ddy
-A = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
-B = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
+A1 = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
+A2 = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
 
-# A = Matrix(A)
-# B = Matrix(B)
+# Use the full matrix
+A1 = Matrix(A1)
+A2 = Matrix(A2)
 
 # Create the initial data
-U = @. 0.5 * exp(-400 * (X - 0.3)^2 - 400 * (Y - 0.35)^2 ) + 
+U_init = @. 0.5 * exp(-400 * (X - 0.3)^2 - 400 * (Y - 0.35)^2 ) + 
      0.8 * exp(-400 * (X - 0.65)^2 - 400 * (Y - 0.5)^2 )
 
-# Apply the SVD to the initial data
-Vx_n, S_n, Vy_n = svd(U)
-S_n = Diagonal(S_n)
+# Apply the SVD to the initial data (CPU)
+Vx_old, S_old, Vy_old = svd(U_init)
+S_old = Diagonal(S_old)
 
-# The initial data is rank two, but we could use information from
-# the singular values
-Vx_n = Vx_n[:, 1:2]
-Vy_n = Vy_n[:, 1:2]
-S_n = S_n[1:2,1:2]
+# The initial data is rank two
+Vx_old = Vx_old[:, 1:2]
+Vy_old = Vy_old[:, 1:2]
+S_old = S_old[1:2,1:2]
 
-# Call the Sylvester solver
-max_iter = 10
-max_rank = 100
-max_size = 50
-
+# Call the Krylov solver
 @btime begin
-
-    Vx_nn, Vy_nn, S_nn, iter = extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank, max_size)
-    
+    Vx_new, Vy_new, S_new, iter = extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
 end
 
 
 # # Use this to check for a type instability
-# @code_warntype extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# @code_warntype extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
 
 
 # # Reset defaults for the number of samples and total time for
@@ -297,7 +269,7 @@ end
 # BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
-# benchmark_data = @benchmark extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+# benchmark_data = @benchmark extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
 
 # # Times are in nano-seconds (ns) which are converted to seconds
 # sample_times = benchmark_data.times
@@ -317,7 +289,7 @@ end
 
 # ProfileView.@profview begin
 #     for iter = 1:50
-#         extended_krylov_step(Vx_n, Vy_n, S_n, A, B, rel_eps, max_iter, max_rank)
+#         extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
 #     end
 # end 
 
