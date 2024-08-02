@@ -139,7 +139,11 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
     inv_A2V_curr = CuMatrix{Float64}(undef, size(V_old))
 
     # Define S1 here to extend its scope
+    S1_h = Matrix{Float64}(undef, size(S_old))
     S1_d = CuMatrix{Float64}(undef, size(S_old))
+
+    # Create a container to hold references to the two R matrices defined locally in the sync blocks
+    R_container = Vector{CuMatrix{Float64}}(undef, 2)
 
     # Variables to track during construction of the Krylov subspaces
     converged = false
@@ -147,58 +151,97 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
 
     for iter_count = 1:max_iter
 
-        # Extended Krylov bases and concatenate with the existing bases
-        mul!(A1U_curr, A1, A1U_prev)
-        ldiv!(inv_A1U_curr, FA1, inv_A1U_prev)
+        @sync begin
+            # Extend the Krylov bases
+            A1U_basis = Threads.@spawn mul!(A1U_curr, A1, A1U_prev)
+            A2V_basis = Threads.@spawn mul!(A2V_curr, A2, A2V_prev)
+            inv_A1U_basis = Threads.@spawn ldiv!(inv_A1U_curr, FA1, inv_A1U_prev)
+            inv_A2V_basis = Threads.@spawn ldiv!(inv_A2V_curr, FA2, inv_A2V_prev)
 
-        mul!(A2V_curr, A2, A2V_prev)
-        ldiv!(inv_A2V_curr, FA2, inv_A2V_prev)
+            # Orthogonalize the augmented bases
+            U_orthog = Threads.@spawn begin
+                wait(A1U_basis), wait(inv_A1U_basis)
+                F_U = qr!(hcat(U, A1U_curr, inv_A1U_curr))
+                U = CuMatrix(F_U.Q)
+            end
 
-        # Orthogonalize the augmented bases
-        F_U = qr!(hcat(U, A1U_curr, inv_A1U_curr))
-        F_V = qr!(hcat(V, A2V_curr, inv_A2V_curr))
+            V_orthog = Threads.@spawn begin
+                wait(A2V_basis), wait(inv_A2V_basis)
+                F_V = qr!(hcat(V, A2V_curr, inv_A2V_curr))
+                V = CuMatrix(F_V.Q)
+            end
 
-        U = CuMatrix(F_U.Q)
-        V = CuMatrix(F_V.Q)
+            # Compute the coefficients for the Sylvester equation (DtH)
+            A1_tilde_DtH = Threads.@spawn begin
+                wait(U_orthog)
+                A1_tilde = Array(U'*A1*U)
+            end
 
-        # Build and solve the reduced system using the Sylvester solver
-        A1U = A1*U
-        A2V = A2*V
+            A2_tilde_DtH = Threads.@spawn begin
+                wait(V_orthog)
+                A2_tilde = Array(V'*A2*V)
+            end
 
-        # Compute and copy the coefficients to the CPU
-        A1_tilde = Array(U'*A1U)
-        A2_tilde = Array(V'*A2V)
-        B1_tilde = Array((U'*U_old)*S_old*(V_old'*V))
-        S1_h = sylvc(A1_tilde, A2_tilde, B1_tilde)
+            B1_tilde_DtH = Threads.@spawn begin
+                wait(U_orthog), wait(V_orthog)
+                B1_tilde = Array((U'*U_old)*S_old*(V_old'*V))
+            end
 
-        # Copy S1 from the CPU back to the GPU
-        S1_d = CuArray(S1_h)
+            sylvester_solve_HtD = Threads.@spawn begin
+                # Wait until the coefficients are available
+                wait(A1_tilde_DtH), wait(A2_tilde_DtH), wait(B1_tilde_DtH)
 
-        # Check convergence of the solver using the spectral norm of the residual
-        # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
-        _, RU = qr!(hcat(U, A1U))
-        _, RV = qr!(hcat(V, A2V))
+                # Solve the Sylvester equation on the CPU
+                S1_h = sylvc(A1_tilde, A2_tilde, B1_tilde)
 
-        # Build the blocks of the matrix [-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]
-	block_matrix = [-CuArray(B1_tilde) S1_d; S1_d CUDA.zeros(size(S1_d))]
-	residual = RU*block_matrix*RV'
+                # Copy the data back to GPU memory
+                S1_d = CuArray(S1_h)
+            end
 
-        # Compute the spectral norm of the residual
-        sigma = svdvals!(residual)
-        @CUDA.allowscalar spectral_norm = sigma[1]
+            # Compute the R matrices for the evaluation of the residual
+            # Can add waits here to shift the scheduling around
+            RU_residual = Threads.@spawn begin
+                A1U = A1*U
+                _, RU = qr!(hcat(U, A1U))
+                R_container[1] = RU
+            end
 
-        if spectral_norm < threshold
+            RV_residual = Threads.@spawn begin
+                A2V = A2*V
+                _, RV = qr!(hcat(V, A2V))
+                R_container[2] = RV
+            end           
+
+            # Check the convergence of the solver using the spectral norm of the residual
+            # We recompute B1_tilde to avoid communications
+            Threads.@spawn begin
+
+                wait(U_orthog), wait(V_orthog)
+                B1_tilde = (U'*U_old)*S_old*(V_old'*V)
+
+                wait(sylvester_solve_HtD)
+                block_matrix = [-B1_tilde S1_d; S1_d CUDA.zeros(size(S1_d))]
+
+                wait(RU_residual), wait(RV_residual)
+                residual = RU*block_matrix*RV'
+        
+                sigma = svdvals!(residual)
+                @CUDA.allowscalar converged = sigma[1] < threshold  
+            end
+        end
+
+        if converged
             num_iterations = iter_count
-            converged = true
             break
         end
 
-        A1U_prev .= A1U_curr
-        inv_A1U_prev .= inv_A1U_curr
-
-        A2V_prev .= A2V_curr
-        inv_A2V_prev .= inv_A2V_curr
-
+        # Swap iterates for the next pass
+        @sync begin
+            Threads.@spawn A1U_prev .= A1U_curr
+            Threads.@spawn inv_A1U_prev .= inv_A1U_curr
+            Threads.@spawn A2V_prev .= A2V_curr
+            Threads.@spawn inv_A2V_prev .= inv_A2V_curr 
+        end
     end
 
     # Perform SVD truncation on the dense solution tensor
@@ -211,10 +254,8 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
     r = sum(S_tilde .> threshold)
     r = min(r, max_rank)
 
-    # Define the new core tensor
+    # Define the new core tensor and join the bases
     S_new = Diagonal(S_tilde[1:r])
-
-    # Join the orthogonal bases from the QR and SVD steps
     U_new = U*U_tilde
     V_new = V*V_tilde
 
@@ -273,3 +314,128 @@ end
 # # Use this to check for a type instability
 # @code_warntype extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 
+
+
+
+
+
+
+
+
+
+
+
+
+# # Old code....
+# #
+# #
+# @fastmath @views function extended_krylov_step_gpu(U_old::CuMatrix{Float64}, V_old::CuMatrix{Float64}, S_old::FullOrDiagonalCuMatrix, 
+#     A1::FullOrSparseCuMatrix, A2::FullOrSparseCuMatrix, 
+#     rel_tol::Float64, max_iter::Int32, max_rank::Int32)
+
+# # Tolerance for the construction of the Krylov basis
+# threshold = CUDA.@allowscalar S_old[1,1]*rel_tol
+
+# # Precompute the LU factorizations of A1 and A2
+# FA1 = lu(A1)
+# FA2 = lu(A2)
+
+# # Initialize the Krylov bases
+# U = copy(U_old)
+# V = copy(V_old)
+
+# # Storage for A1^{k}U and A2^{k}V for two iterates
+# A1U_prev = copy(U_old)
+# A2V_prev = copy(V_old)
+# A1U_curr = CuMatrix{Float64}(undef, size(U_old))
+# A2V_curr = CuMatrix{Float64}(undef, size(V_old))
+
+# # Storage for A1^{-k}U and A2^{-k}V for two iterates
+# inv_A1U_prev = copy(U_old)
+# inv_A2V_prev = copy(V_old)
+# inv_A1U_curr = CuMatrix{Float64}(undef, size(U_old))
+# inv_A2V_curr = CuMatrix{Float64}(undef, size(V_old))
+
+# # Define S1 here to extend its scope
+# S1_d = CuMatrix{Float64}(undef, size(S_old))
+
+# # Variables to track during construction of the Krylov subspaces
+# converged = false
+# num_iterations = 0
+
+# for iter_count = 1:max_iter
+
+# # Extended Krylov bases and concatenate with the existing bases
+# mul!(A1U_curr, A1, A1U_prev)
+# ldiv!(inv_A1U_curr, FA1, inv_A1U_prev)
+
+# mul!(A2V_curr, A2, A2V_prev)
+# ldiv!(inv_A2V_curr, FA2, inv_A2V_prev)
+
+# # Orthogonalize the augmented bases
+# F_U = qr!(hcat(U, A1U_curr, inv_A1U_curr))
+# F_V = qr!(hcat(V, A2V_curr, inv_A2V_curr))
+
+# U = CuMatrix(F_U.Q)
+# V = CuMatrix(F_V.Q)
+
+# # Build and solve the reduced system using the Sylvester solver
+# A1U = A1*U
+# A2V = A2*V
+
+# # Compute and copy the coefficients to the CPU
+# A1_tilde = Array(U'*A1U)
+# A2_tilde = Array(V'*A2V)
+# B1_tilde = Array((U'*U_old)*S_old*(V_old'*V))
+# S1_h = sylvc(A1_tilde, A2_tilde, B1_tilde)
+
+# # Copy S1 from the CPU back to the GPU
+# S1_d = CuArray(S1_h)
+
+# # Check convergence of the solver using the spectral norm of the residual
+# # RU*[-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]*RV'
+# _, RU = qr!(hcat(U, A1U))
+# _, RV = qr!(hcat(V, A2V))
+
+# # Build the blocks of the matrix [-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]
+# block_matrix = [-CuArray(B1_tilde) S1_d; S1_d CUDA.zeros(size(S1_d))]
+# residual = RU*block_matrix*RV'
+
+# # Compute the spectral norm of the residual
+# sigma = svdvals!(residual)
+# @CUDA.allowscalar spectral_norm = sigma[1]
+
+# if spectral_norm < threshold
+# num_iterations = iter_count
+# converged = true
+# break
+# end
+
+# A1U_prev .= A1U_curr
+# inv_A1U_prev .= inv_A1U_curr
+
+# A2V_prev .= A2V_curr
+# inv_A2V_prev .= inv_A2V_curr
+
+# end
+
+# # Perform SVD truncation on the dense solution tensor
+# U_tilde, S_tilde, V_tilde = svd!(S1_d)
+
+# # Here S_tilde is a vector, so we do this before
+# # we promote S_tilde to a diagonal matrix
+# # We can exploit the fact that S_tilde is ordered (descending)
+# CUDA.@allowscalar threshold = S_tilde[1]*rel_tol
+# r = sum(S_tilde .> threshold)
+# r = min(r, max_rank)
+
+# # Define the new core tensor
+# S_new = Diagonal(S_tilde[1:r])
+
+# # Join the orthogonal bases from the QR and SVD steps
+# U_new = U*U_tilde
+# V_new = V*V_tilde
+
+# return U_new, V_new, S_new, num_iterations
+
+# end

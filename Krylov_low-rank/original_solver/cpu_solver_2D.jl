@@ -17,11 +17,11 @@ settings = ArgParseSettings()
         default = 1.0
     "--Nx"
         help = "Number grid points in x";
-        arg_type = Int32
+        arg_type = Int
         default = 101
     "--Ny"
         help = "Number grid points in y";
-        arg_type = Int32
+        arg_type = Int
         default = 101
     "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
@@ -29,11 +29,11 @@ settings = ArgParseSettings()
         default = 1.0e-3
     "--max_rank"
         help = "Maximum rank used in the representation of the function."
-        arg_type = Int32
+        arg_type = Int
         default = 32
     "--max_iter"
         help = "Maximum number of Krylov iterations"
-        arg_type = Int32
+        arg_type = Int
         default = 10
     "--use_mkl"
         help = "Use the Intel Math Kernel Library rather than OpenBLAS"
@@ -107,12 +107,12 @@ The iteration terminates early provided the following condition is satisfied:
 This quantity is measured by projecting onto the low-dimensional subspaces to reduce the
 complexity of its formation. We use the spectral norm here.
 """
-const FullOrSparseMatrix = Union{Matrix{Float64},SparseMatrixCSC{Float64, Int32}}
+const FullOrSparseMatrix = Union{Matrix{Float64},SparseMatrixCSC{Float64, Int64}}
 const FullOrDiagonalMatrix = Union{Matrix{Float64}, Diagonal{Float64, Vector{Float64}}}
 
 @fastmath @views function extended_krylov_step_cpu(U_old::Matrix{Float64}, V_old::Matrix{Float64}, S_old::FullOrDiagonalMatrix, 
                                   A1::FullOrSparseMatrix, A2::FullOrSparseMatrix, 
-                                  rel_tol::Float64, max_iter::Int32, max_rank::Int32)
+                                  rel_tol::Float64, max_iter::Int64, max_rank::Int64)
 
     # Tolerance for the construction of the Krylov basis
     threshold = opnorm(S_old,2)*rel_tol
@@ -237,9 +237,9 @@ d2 = 0.5               # Diffusion coefficient for ddy
 A1 = (1/3)*spdiagm(0 => ones(size(Dxx, 1))) - dtn*(d1^2)*Dxx
 A2 = (1/3)*spdiagm(0 => ones(size(Dyy, 1))) - dtn*(d2^2)*Dyy
 
-# Use the full matrix
-A1 = Matrix(A1)
-A2 = Matrix(A2)
+# # Use the full matrix
+# A1 = Matrix(A1)
+# A2 = Matrix(A2)
 
 # Create the initial data
 U_init = @. 0.5 * exp(-400 * (X - 0.3)^2 - 400 * (Y - 0.35)^2 ) + 
