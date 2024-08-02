@@ -17,11 +17,11 @@ settings = ArgParseSettings()
         default = 1.0
     "--Nx"
         help = "Number grid points in x";
-        arg_type = Int
+        arg_type = Int32
         default = 101
     "--Ny"
         help = "Number grid points in y";
-        arg_type = Int
+        arg_type = Int32
         default = 101
     "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
@@ -29,11 +29,11 @@ settings = ArgParseSettings()
         default = 1.0e-3
     "--max_rank"
         help = "Maximum rank used in the representation of the function."
-        arg_type = Int
+        arg_type = Int32
         default = 32
     "--max_iter"
         help = "Maximum number of Krylov iterations"
-        arg_type = Int
+        arg_type = Int32
         default = 10
     "--use_mkl"
         help = "Use the Intel Math Kernel Library rather than OpenBLAS"
@@ -107,15 +107,15 @@ The iteration terminates early provided the following condition is satisfied:
 This quantity is measured by projecting onto the low-dimensional subspaces to reduce the
 complexity of its formation. We use the spectral norm here.
 """
-const FullOrSparseMatrix = Union{Matrix{Float64},SparseMatrixCSC{Float64, Int64}}
+const FullOrSparseMatrix = Union{Matrix{Float64},SparseMatrixCSC{Float64, Int32}}
 const FullOrDiagonalMatrix = Union{Matrix{Float64}, Diagonal{Float64, Vector{Float64}}}
 
 @fastmath @views function extended_krylov_step_cpu(U_old::Matrix{Float64}, V_old::Matrix{Float64}, S_old::FullOrDiagonalMatrix, 
                                   A1::FullOrSparseMatrix, A2::FullOrSparseMatrix, 
-                                  rel_eps::Float64, max_iter::Int, max_rank::Int)
+                                  rel_tol::Float64, max_iter::Int32, max_rank::Int32)
 
     # Tolerance for the construction of the Krylov basis
-    threshold = opnorm(S_old,2)*rel_eps
+    threshold = opnorm(S_old,2)*rel_tol
 
     # Precompute the LU factorizations of A1 and A2
     FA1 = lu(A1)
@@ -197,7 +197,7 @@ const FullOrDiagonalMatrix = Union{Matrix{Float64}, Diagonal{Float64, Vector{Flo
     # Here S_tilde is a vector, so we do this before
     # we promote S_tilde to a diagonal matrix
     # We can exploit the fact that S_tilde is ordered (descending)
-    r = sum(S_tilde .> rel_eps*S_tilde[1])
+    r = sum(S_tilde .> rel_tol*S_tilde[1])
     r = min(r, max_rank)
 
     # Define the new core tensor
@@ -256,12 +256,12 @@ S_old = S_old[1:2,1:2]
 
 # Call the Krylov solver
 @btime begin
-    Vx_new, Vy_new, S_new, iter = extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
+    Vx_new, Vy_new, S_new, iter = extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 end
 
 
 # # Use this to check for a type instability
-# @code_warntype extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
+# @code_warntype extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_eps, max_iter, max_rank)
 
 
 # # Reset defaults for the number of samples and total time for

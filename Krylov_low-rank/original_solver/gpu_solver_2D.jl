@@ -17,11 +17,11 @@ settings = ArgParseSettings()
         default = 1.0
     "--Nx"
         help = "Number grid points in x";
-        arg_type = Int
+        arg_type = Int32
         default = 101
     "--Ny"
         help = "Number grid points in y";
-        arg_type = Int
+        arg_type = Int32
         default = 101
     "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
@@ -29,11 +29,11 @@ settings = ArgParseSettings()
         default = 1.0e-3
     "--max_rank"
         help = "Maximum rank used in the representation of the function."
-        arg_type = Int
+        arg_type = Int32
         default = 32
     "--max_iter"
         help = "Maximum number of Krylov iterations"
-        arg_type = Int
+        arg_type = Int32
         default = 10
     "--use_mkl"
         help = "Use the Intel Math Kernel Library rather than OpenBLAS"
@@ -71,7 +71,7 @@ end
 
 using Printf
 using BenchmarkTools
-using CUDA
+using CUDA, CUDA.CUSPARSE
 using LinearAlgebra
 using SparseArrays
 using MatrixEquations
@@ -108,15 +108,15 @@ The iteration terminates early provided the following condition is satisfied:
 This quantity is measured by projecting onto the low-dimensional subspaces to reduce the
 complexity of its formation. We use the spectral norm here.
 """
-const FullOrSparseMatrix = Union{CuMatrix{Float64},CuSparseMatrixCSR{Float64, Int64}}
-const FullOrDiagonalMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuVector{Float64}}}
+const FullOrSparseCuMatrix = Union{CuMatrix{Float64},CuSparseMatrixCSR{Float64, Int32}}
+const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArray{Float64, 1, CUDA.DeviceMemory}}}
 
 @fastmath @views function extended_krylov_step_gpu(U_old::CuMatrix{Float64}, V_old::CuMatrix{Float64}, S_old::FullOrDiagonalCuMatrix, 
-                                  A1::FullOrSparseMatrix, A2::FullOrSparseMatrix, 
-                                  rel_eps::Float64, max_iter::Int, max_rank::Int)
+                                  A1::FullOrSparseCuMatrix, A2::FullOrSparseCuMatrix, 
+                                  rel_tol::Float64, max_iter::Int32, max_rank::Int32)
 
     # Tolerance for the construction of the Krylov basis
-    threshold = CUDA.@allowscalar S[1,1]*rel_eps
+    threshold = CUDA.@allowscalar S_old[1,1]*rel_tol
 
     # Precompute the LU factorizations of A1 and A2
     FA1 = lu(A1)
@@ -138,7 +138,7 @@ const FullOrDiagonalMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuVector
     inv_A1U_curr = CuMatrix{Float64}(undef, size(U_old))
     inv_A2V_curr = CuMatrix{Float64}(undef, size(V_old))
 
-    # Initialize S1 here to extend its scope
+    # Define S1 here to extend its scope
     S1_d = CuMatrix{Float64}(undef, size(S_old))
 
     # Variables to track during construction of the Krylov subspaces
@@ -180,7 +180,8 @@ const FullOrDiagonalMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuVector
         _, RV = qr!(hcat(V, A2V))
 
         # Build the blocks of the matrix [-B1_tilde S1; S1 zeros(size(S1, 1), size(S1, 2))]
-        residual = RU*[-B1_tilde S1_d; S1_d CUDA.zeros(size(S1_d, 1), size(S1_d, 2))]*RV'
+	block_matrix = [-CuArray(B1_tilde) S1_d; S1_d CUDA.zeros(size(S1_d))]
+	residual = RU*block_matrix*RV'
 
         # Compute the spectral norm of the residual
         sigma = svdvals!(residual)
@@ -206,7 +207,7 @@ const FullOrDiagonalMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuVector
     # Here S_tilde is a vector, so we do this before
     # we promote S_tilde to a diagonal matrix
     # We can exploit the fact that S_tilde is ordered (descending)
-    CUDA.@allowscalar threshold = S_tilde*rel_eps
+    CUDA.@allowscalar threshold = S_tilde[1]*rel_tol
     r = sum(S_tilde .> threshold)
     r = min(r, max_rank)
 
@@ -266,9 +267,9 @@ S_old = CuArray(S_old[1:2,1:2])
 
 # Call the Krylov solver
 @btime begin
-    Vx_new, Vy_new, S_new, iter = extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_eps, max_iter, max_rank)
+    Vx_new, Vy_new, S_new, iter = extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 end
 
 # # Use this to check for a type instability
-# @code_warntype extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_eps, max_iter, max_rank)
+# @code_warntype extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 
