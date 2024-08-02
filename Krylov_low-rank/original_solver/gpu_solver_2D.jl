@@ -17,11 +17,11 @@ settings = ArgParseSettings()
         default = 1.0
     "--Nx"
         help = "Number grid points in x";
-        arg_type = Int32
+        arg_type = Int
         default = 101
     "--Ny"
         help = "Number grid points in y";
-        arg_type = Int32
+        arg_type = Int
         default = 101
     "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
@@ -29,11 +29,11 @@ settings = ArgParseSettings()
         default = 1.0e-3
     "--max_rank"
         help = "Maximum rank used in the representation of the function."
-        arg_type = Int32
+        arg_type = Int
         default = 32
     "--max_iter"
         help = "Maximum number of Krylov iterations"
-        arg_type = Int32
+        arg_type = Int
         default = 10
     "--use_mkl"
         help = "Use the Intel Math Kernel Library rather than OpenBLAS"
@@ -113,7 +113,7 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
 
 @fastmath @views function extended_krylov_step_gpu(U_old::CuMatrix{Float64}, V_old::CuMatrix{Float64}, S_old::FullOrDiagonalCuMatrix, 
                                   A1::FullOrSparseCuMatrix, A2::FullOrSparseCuMatrix, 
-                                  rel_tol::Float64, max_iter::Int32, max_rank::Int32)
+                                  rel_tol::Float64, max_iter::Int, max_rank::Int)
 
     # Tolerance for the construction of the Krylov basis
     threshold = CUDA.@allowscalar S_old[1,1]*rel_tol
@@ -142,8 +142,12 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
     S1_h = Matrix{Float64}(undef, size(S_old))
     S1_d = CuMatrix{Float64}(undef, size(S_old))
 
-    # Create a container to hold references to the two R matrices defined locally in the sync blocks
+    # Create a container to hold references to the two R matrices defined in the tasks
     R_container = Vector{CuMatrix{Float64}}(undef, 2)
+
+    # Create a container to hold the references to the sylvester coefficients defined in the tasks
+    # These are present on the host
+    sylvester_coeffs = Vector{Matrix{Float64}}(undef, 3)
 
     # Variables to track during construction of the Krylov subspaces
     converged = false
@@ -175,38 +179,46 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
             A1_tilde_DtH = Threads.@spawn begin
                 wait(U_orthog)
                 A1_tilde = Array(U'*A1*U)
+		sylvester_coeffs[1] = A1_tilde
             end
 
             A2_tilde_DtH = Threads.@spawn begin
                 wait(V_orthog)
                 A2_tilde = Array(V'*A2*V)
+		sylvester_coeffs[2] = A2_tilde
             end
 
             B1_tilde_DtH = Threads.@spawn begin
                 wait(U_orthog), wait(V_orthog)
                 B1_tilde = Array((U'*U_old)*S_old*(V_old'*V))
+		sylvester_coeffs[3] = B1_tilde
             end
 
             sylvester_solve_HtD = Threads.@spawn begin
                 # Wait until the coefficients are available
                 wait(A1_tilde_DtH), wait(A2_tilde_DtH), wait(B1_tilde_DtH)
 
+		A1_tilde_h = sylvester_coeffs[1]
+		A2_tilde_h = sylvester_coeffs[2]
+		B1_tilde_h = sylvester_coeffs[3]
+
                 # Solve the Sylvester equation on the CPU
-                S1_h = sylvc(A1_tilde, A2_tilde, B1_tilde)
+                S1_h = sylvc(A1_tilde_h, A2_tilde_h, B1_tilde_h)
 
                 # Copy the data back to GPU memory
                 S1_d = CuArray(S1_h)
             end
 
             # Compute the R matrices for the evaluation of the residual
-            # Can add waits here to shift the scheduling around
             RU_residual = Threads.@spawn begin
+		wait(U_orthog)
                 A1U = A1*U
                 _, RU = qr!(hcat(U, A1U))
                 R_container[1] = RU
             end
 
             RV_residual = Threads.@spawn begin
+		wait(V_orthog)
                 A2V = A2*V
                 _, RV = qr!(hcat(V, A2V))
                 R_container[2] = RV
@@ -223,7 +235,14 @@ const FullOrDiagonalCuMatrix = Union{CuMatrix{Float64}, Diagonal{Float64, CuArra
                 block_matrix = [-B1_tilde S1_d; S1_d CUDA.zeros(size(S1_d))]
 
                 wait(RU_residual), wait(RV_residual)
-                residual = RU*block_matrix*RV'
+                RU = R_container[1]
+		RV = R_container[2]
+
+		#@show size(RU)
+		#@show size(block_matrix)
+		#@show size(RV)
+
+		residual = RU*block_matrix*RV'
         
                 sigma = svdvals!(residual)
                 @CUDA.allowscalar converged = sigma[1] < threshold  
@@ -306,20 +325,42 @@ Vx_old = CuArray(Vx_old[:, 1:2])
 Vy_old = CuArray(Vy_old[:, 1:2])
 S_old = CuArray(S_old[1:2,1:2])
 
-# Call the Krylov solver
+CUDA.synchronize()
+
+@printf "Preparing to start profiling...\n"
+
 @btime begin
-    Vx_new, Vy_new, S_new, iter = extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+    extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+    synchronize()
 end
 
-# # Use this to check for a type instability
-# @code_warntype extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+# First call to compile the code
+#for _=1:5
+#    Vx_new, Vy_new, S_new, iter = extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+#    synchronize()
+#end
+
+#BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
+#BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
+
+# Call the Krylov solver
+#benchmark_data = @benchmark CUDA.@sync extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+
+## Times are in nano-seconds (ns) which are converted to seconds
+#sample_times = benchmark_data.times
+#sample_times /= 10^9
+
+#@printf "Minimum (s): %.8e\n" minimum(sample_times)
+#@printf "Maximum (s): %.8e\n" maximum(sample_times)
+#@printf "Median (s): %.8e\n" median(sample_times)
+#@printf "Mean (s): %.8e\n" mean(sample_times)
+#@printf "Standard deviation (s): %.8e\n" std(sample_times)
 
 
 
 
-
-
-
+# Use this to check for a type instability
+#@code_warntype extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 
 
 
