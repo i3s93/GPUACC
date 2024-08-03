@@ -18,11 +18,11 @@ settings = ArgParseSettings()
     "--Nx"
         help = "Number grid points in x";
         arg_type = Int
-        default = 101
+        default = 1024
     "--Ny"
         help = "Number grid points in y";
         arg_type = Int
-        default = 101
+        default = 1024
     "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
         arg_type = Float64
@@ -327,34 +327,30 @@ S_old = CuArray(S_old[1:2,1:2])
 
 CUDA.synchronize()
 
-@printf "Preparing to start profiling...\n"
+#@printf "Preparing to start profiling...\n"
 
-@btime begin
-    extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
-    synchronize()
-end
-
-# First call to compile the code
-#for _=1:5
-#    Vx_new, Vy_new, S_new, iter = extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+#CUDA.@profile begin
+#@btime begin
+#    extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 #    synchronize()
 #end
 
-#BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
-#BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
+BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
 # Call the Krylov solver
-#benchmark_data = @benchmark CUDA.@sync extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+benchmark_data = @benchmark CUDA.@sync extended_krylov_step_gpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 
-## Times are in nano-seconds (ns) which are converted to seconds
-#sample_times = benchmark_data.times
-#sample_times /= 10^9
+# Times are in nano-seconds (ns) which are converted to seconds
+sample_times = benchmark_data.times
+sample_times /= 10^9
 
-#@printf "Minimum (s): %.8e\n" minimum(sample_times)
-#@printf "Maximum (s): %.8e\n" maximum(sample_times)
-#@printf "Median (s): %.8e\n" median(sample_times)
-#@printf "Mean (s): %.8e\n" mean(sample_times)
-#@printf "Standard deviation (s): %.8e\n" std(sample_times)
+@printf "GPU results:\n"
+@printf "Minimum (s): %.8e\n" minimum(sample_times)
+@printf "Maximum (s): %.8e\n" maximum(sample_times)
+@printf "Median (s): %.8e\n" median(sample_times)
+@printf "Mean (s): %.8e\n" mean(sample_times)
+@printf "Standard deviation (s): %.8e\n" std(sample_times)
 
 
 

@@ -18,11 +18,11 @@ settings = ArgParseSettings()
     "--Nx"
         help = "Number grid points in x";
         arg_type = Int
-        default = 101
+        default = 1024
     "--Ny"
         help = "Number grid points in y";
         arg_type = Int
-        default = 101
+        default = 1024
     "--rel_tol"
         help = "Relative truncation tolerance for SVD truncation"
         arg_type = Float64
@@ -255,32 +255,32 @@ Vy_old = Vy_old[:, 1:2]
 S_old = S_old[1:2,1:2]
 
 # Call the Krylov solver
-@btime begin
-    Vx_new, Vy_new, S_new, iter = extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
-end
+#@btime begin
+#    extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
+#end
 
 
 # # Use this to check for a type instability
-# @code_warntype extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_eps, max_iter, max_rank)
+# @code_warntype extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 
 
-# # Reset defaults for the number of samples and total time for
-# # the benchmarking process
-# BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
-# BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
+# Reset defaults for the number of samples and total time for
+# the benchmarking process
+BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 120
 
-# benchmark_data = @benchmark extended_krylov_step_cpu(Vx_old, Vy_old, S_new, A1, A2, rel_eps, max_iter, max_rank)
+benchmark_data = @benchmark extended_krylov_step_cpu(Vx_old, Vy_old, S_old, A1, A2, rel_tol, max_iter, max_rank)
 
-# # Times are in nano-seconds (ns) which are converted to seconds
-# sample_times = benchmark_data.times
-# sample_times /= 10^9
+# Times are in nano-seconds (ns) which are converted to seconds
+sample_times = benchmark_data.times
+sample_times /= 10^9
 
-# @printf "CPU results:\n"
-# @printf "Minimum (s): %.8e\n" minimum(sample_times)
-# @printf "Maximum (s): %.8e\n" maximum(sample_times)
-# @printf "Median (s): %.8e\n" median(sample_times)
-# @printf "Mean (s): %.8e\n" mean(sample_times)
-# @printf "Standard deviation (s): %.8e\n" std(sample_times)
+@printf "CPU results:\n"
+@printf "Minimum (s): %.8e\n" minimum(sample_times)
+@printf "Maximum (s): %.8e\n" maximum(sample_times)
+@printf "Median (s): %.8e\n" median(sample_times)
+@printf "Mean (s): %.8e\n" mean(sample_times)
+@printf "Standard deviation (s): %.8e\n" std(sample_times)
 
 
 # # Profiling (code is assumed to already be compiled)
