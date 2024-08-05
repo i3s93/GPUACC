@@ -2,8 +2,8 @@
 #include <vector>
 #include <cmath>
 #include <random>
-#include <cuda_runtime.h>
-#include "cublas_v2.h"
+#include <cuda.h>
+#include <cublas_v2.h>
 
 // Maps a tuple for a 2D array index to a 1D index (column-major order)
 // i is the row index, j is the column index, and ld is the leading dimension

@@ -1,18 +1,17 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.18)
+
+# This has to be set before project()
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 86)
+endif()
 
 # Name for the project
-project(Dgemm_Benchmark)
-
-# Specify which packages are required to run the project
-# Note: The Cray compiler wrappers implicitly link Cray LibSci 
-# which contains math libraries such as BLAS, LAPACK, ScaLAPACK, BLACS
-find_package(CUDA REQUIRED)
-
-# Specify the source files for the code
-set(CUDA_SOURCES cublas_dgemm.cu)
+project(Dgemm_Benchmark LANGUAGES CXX CUDA)
 
 # Create the executable target for the CUDA code
-add_executable(dgemm_cuda ${CUDA_SOURCES})
+# The minimum should be C++ 11
+add_executable(dgemm_cuda cublas_dgemm.cu)
+target_compile_features(dgemm_cuda PRIVATE cxx_std_11)
 
-# Linut the libraries to the code
-target_link_libraries(dgemm_cuda ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})
+# Link the libraries to the code
+target_link_libraries(dgemm_cuda PRIVATE ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})
