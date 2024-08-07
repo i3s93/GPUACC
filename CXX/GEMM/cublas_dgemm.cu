@@ -4,6 +4,7 @@
 #include <random>
 #include <cuda.h>
 #include <cublas_v2.h>
+#include <omp.h>
 
 // Maps a tuple for a 2D array index to a 1D index (column-major order)
 // i is the row index, j is the column index, and ld is the leading dimension
@@ -107,7 +108,7 @@ int main() {
     cudaEventSynchronize(dgemm_stop);
 
     // Stop the timer and print the elapsed time in milliseconds
-    float dgemm_total_time = 0;
+    float dgemm_total_time = 0; // This needs to be a float
     cudaEventElapsedTime(&dgemm_total_time, dgemm_start, dgemm_stop);
 
     std::cout << "cuBLAS dgemm total time (ms): " << dgemm_total_time << std::endl;
@@ -117,6 +118,7 @@ int main() {
 
     std::vector<double> C_exact(M*N, 0);
 
+    #pragma omp parallel for collapse(2)
     for (int j = 0; j < N; ++j) {
         for (int k = 0; k < K; ++k) {
             for (int i = 0; i < M; ++i) {
@@ -127,6 +129,7 @@ int main() {
 
     double max_error = 0;
 
+    #pragma omp parallel for collapse(2) reduction(max:max_error)
     for (int j = 0; j < N; ++j) {
         for (int i = 0; i < M; ++i) {
             max_error = std::max(max_error, std::abs(C_h[IDX2C(i, j, M)] - C_exact[IDX2C(i, j, M)]));
