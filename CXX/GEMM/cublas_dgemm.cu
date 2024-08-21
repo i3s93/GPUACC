@@ -1,10 +1,19 @@
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <cmath>
 #include <random>
 #include <cuda.h>
 #include <cublas_v2.h>
 #include <omp.h>
+
+extern "C" {
+    void dgemm_(const char* transa, const char* transb,
+                const int* m, const int* n, const int* k,
+                const double* alpha, const double* a, const int* lda,
+                const double* b, const int* ldb,
+                const double* beta, double* c, const int* ldc);
+}
 
 // Maps a tuple for a 2D array index to a 1D index (column-major order)
 // i is the row index, j is the column index, and ld is the leading dimension
@@ -111,21 +120,38 @@ int main() {
     float dgemm_total_time = 0; // This needs to be a float
     cudaEventElapsedTime(&dgemm_total_time, dgemm_start, dgemm_stop);
 
-    std::cout << "cuBLAS dgemm total time (ms): " << dgemm_total_time << std::endl;
+    std::cout << std::scientific << std::setprecision(6) "cuBLAS dgemm total time (ms): " << dgemm_total_time << std::endl;
 
     // Copy result from device to host to check for correctness
     checkCuda(cudaMemcpy(C_h.data(), C_d, M*N*sizeof(double), cudaMemcpyDeviceToHost));
 
     std::vector<double> C_exact(M*N, 0);
 
-    #pragma omp parallel for collapse(2)
-    for (int j = 0; j < N; ++j) {
-        for (int k = 0; k < K; ++k) {
-            for (int i = 0; i < M; ++i) {
-                C_exact[IDX2C(i, j, M)] += A_h[IDX2C(i, k, M)] * B_h[IDX2C(k, j, K)];
-            }
-        }
-    }
+    // Compute the solution on the host side using BLAS
+    // We reuse the coefficients and leading dimensions in the call
+    char transa = 'N';
+    char transb = 'N';
+
+    double host_start_time = omp_get_wtime();
+
+    dgemm_(&transa, &transb, &M, &N, &K, &alpha, A_h.data(), &M, B_h.data(), &N, &beta, C_exact.data(), &K);
+
+    double host_end_time = omp_get_wtime();
+
+    // Total time returned is in seconds, so we convert it to ms
+    double host_dgemm_total_time = host_end_time - host_start_time;
+    host_total_time *= 1000;
+
+    std::cout << std::scientific << std::setprecision(6) "BLAS dgemm total time (ms): " << host_dgemm_total_time << std::endl;
+
+    // #pragma omp parallel for collapse(2)
+    // for (int j = 0; j < N; ++j) {
+    //     for (int k = 0; k < K; ++k) {
+    //         for (int i = 0; i < M; ++i) {
+    //             C_exact[IDX2C(i, j, M)] += A_h[IDX2C(i, k, M)] * B_h[IDX2C(k, j, K)];
+    //         }
+    //     }
+    // }
 
     double max_error = 0;
 
