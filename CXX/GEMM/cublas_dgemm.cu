@@ -120,7 +120,7 @@ int main() {
     float dgemm_total_time = 0; // This needs to be a float
     cudaEventElapsedTime(&dgemm_total_time, dgemm_start, dgemm_stop);
 
-    std::cout << std::scientific << std::setprecision(6) "cuBLAS dgemm total time (ms): " << dgemm_total_time << std::endl;
+    std::cout << std::scientific << std::setprecision(6) << "cuBLAS dgemm total time (ms): " << dgemm_total_time << std::endl;
 
     // Copy result from device to host to check for correctness
     checkCuda(cudaMemcpy(C_h.data(), C_d, M*N*sizeof(double), cudaMemcpyDeviceToHost));
@@ -140,9 +140,9 @@ int main() {
 
     // Total time returned is in seconds, so we convert it to ms
     double host_dgemm_total_time = host_end_time - host_start_time;
-    host_total_time *= 1000;
+    host_dgemm_total_time *= 1000;
 
-    std::cout << std::scientific << std::setprecision(6) "BLAS dgemm total time (ms): " << host_dgemm_total_time << std::endl;
+    std::cout << std::scientific << std::setprecision(6) << "BLAS dgemm total time (ms): " << host_dgemm_total_time << std::endl;
 
     // #pragma omp parallel for collapse(2)
     // for (int j = 0; j < N; ++j) {
