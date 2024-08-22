@@ -80,7 +80,7 @@ T mean(const std::vector<T> &data){
     for (const auto &item: data){
         sum += item;
     }
-    return sum / static_cast<T>(data.size());
+    return sum/static_cast<T>(data.size());
 }
 
 template<typename T>
@@ -96,12 +96,13 @@ T stdev(const std::vector<T> &data){
 
 template<typename T>
 void print_stats_summary(const std::string &device_name, const std::vector<T> &data){
-    std::cout << "Run statistics for " << device_name << std::endl;
-    std::cout << "Total number of samples taken: " << static_cast<int>(data.size()) << std::endl;
-    std::cout << std::scientific << std::setprecision(4) << "Mean runtime (ms): " << mean(data) << std::endl;
-    std::cout << std::scientific << std::setprecision(4) << "Min runtime (ms): " << min(data) << std::endl;
-    std::cout << std::scientific << std::setprecision(4) << "Max runtime (ms): " << max(data) << std::endl;
-    std::cout << std::scientific << std::setprecision(4) << "stdev: " << stdev(data) << std::endl;
+    std::cout << "\nRun statistics for " << device_name << std::endl;
+    std::cout << "Total number of samples taken: " << data.size() << std::endl;
+    std::cout << std::scientific << std::setprecision(4) << "Mean runtime (ms): " << mean(data) << "\n";
+    std::cout << std::scientific << std::setprecision(4) << "Min runtime (ms): " << min(data) << "\n";
+    std::cout << std::scientific << std::setprecision(4) << "Max runtime (ms): " << max(data) << "\n";
+    std::cout << std::scientific << std::setprecision(4) << "stdev: " << stdev(data) << "\n";
+    std::cout << "\n";
     return;
 }
 
@@ -112,11 +113,16 @@ int main(int argc, char** argv) {
     try {
     // Create each of the arguments
     TCLAP::CmdLine cmd("Command description message", ' ', "1.0");
-    TCLAP::ValueArg<int> M_Arg("M", "", "Number of rows of A and C", false, 1024, "int", cmd);
-    TCLAP::ValueArg<int> N_Arg("N", "", "Number of columns of B and C", false, 1024, "int", cmd);
-    TCLAP::ValueArg<int> K_Arg("K", "", "Number of columns of A and rows of B", false, 1024, "int", cmd);
-    TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 10, "int", cmd);
-    
+    TCLAP::ValueArg<int> M_Arg("M", "M_size", "Number of rows of A and C", false, 1024, "int");
+    TCLAP::ValueArg<int> N_Arg("N", "N_size", "Number of columns of B and C", false, 1024, "int");
+    TCLAP::ValueArg<int> K_Arg("K", "K_size", "Number of columns of A and rows of B", false, 1024, "int");
+    TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 100, "int");
+   
+    cmd.add(M_Arg);
+    cmd.add(N_Arg);
+    cmd.add(K_Arg);
+    cmd.add(t_Arg);
+
 	// Parse the argv array.
 	cmd.parse(argc, argv);
 
@@ -125,6 +131,12 @@ int main(int argc, char** argv) {
     N = N_Arg.getValue();
     K = K_Arg.getValue();
     trials = t_Arg.getValue();
+
+    std::cout << "\nRun arguments:" << "\n";
+    std::cout << "M = " << M << "\n";
+    std::cout << "N = " << N << "\n";
+    std::cout << "K = " << K << "\n";
+    std::cout << "trials = " << trials << "\n";
 
     // Catch any exceptions
 	} catch (TCLAP::ArgException &e)
@@ -251,7 +263,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "dgemm max error (between host and device): " << max_error << std::endl;
+    std::cout << "dgemm max error (between host and device): " << max_error << "\n";
+    std::cout << "\n";
 
     // Clean up the device arrays, events, and the cuBLAS handle
     checkCuda(cudaFree(A_d));
