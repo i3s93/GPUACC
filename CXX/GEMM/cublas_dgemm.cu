@@ -47,7 +47,7 @@ void checkCublas(cublasStatus_t result) {
             case CUBLAS_STATUS_INTERNAL_ERROR: std::cerr << "CUBLAS_STATUS_INTERNAL_ERROR"; break;
             default: std::cerr << "UNKNOWN"; break;
         }
-        std::cerr << std::endl;
+        std::cerr << "\n";
         exit(EXIT_FAILURE);
     }
 }
@@ -111,38 +111,34 @@ int main(int argc, char** argv) {
     int M, N, K, trials;
 
     try {
-    // Create each of the arguments
-    TCLAP::CmdLine cmd("Command description message", ' ', "1.0");
-    TCLAP::ValueArg<int> M_Arg("M", "M_size", "Number of rows of A and C", false, 1024, "int");
-    TCLAP::ValueArg<int> N_Arg("N", "N_size", "Number of columns of B and C", false, 1024, "int");
-    TCLAP::ValueArg<int> K_Arg("K", "K_size", "Number of columns of A and rows of B", false, 1024, "int");
-    TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 100, "int");
-   
-    cmd.add(M_Arg);
-    cmd.add(N_Arg);
-    cmd.add(K_Arg);
-    cmd.add(t_Arg);
+        // Create each of the arguments
+        TCLAP::CmdLine cmd("Command description message", ' ', "1.0");
+        TCLAP::ValueArg<int> M_Arg("M", "M_size", "Number of rows of A and C", false, 1024, "int");
+        TCLAP::ValueArg<int> N_Arg("N", "N_size", "Number of columns of B and C", false, 1024, "int");
+        TCLAP::ValueArg<int> K_Arg("K", "K_size", "Number of columns of A and rows of B", false, 1024, "int");
+        TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 100, "int");
 
-	// Parse the argv array.
-	cmd.parse(argc, argv);
+        cmd.add(M_Arg);
+        cmd.add(N_Arg);
+        cmd.add(K_Arg);
+        cmd.add(t_Arg);
 
-    // Assign parsed values to variables
-    M = M_Arg.getValue();
-    N = N_Arg.getValue();
-    K = K_Arg.getValue();
-    trials = t_Arg.getValue();
+        // Parse the argv array.
+        cmd.parse(argc, argv);
 
-    std::cout << "\nRun arguments:" << "\n";
-    std::cout << "M = " << M << "\n";
-    std::cout << "N = " << N << "\n";
-    std::cout << "K = " << K << "\n";
-    std::cout << "trials = " << trials << "\n";
+        // Assign parsed values to variables
+        M = M_Arg.getValue();
+        N = N_Arg.getValue();
+        K = K_Arg.getValue();
+        trials = t_Arg.getValue();
 
-    // Catch any exceptions
-	} catch (TCLAP::ArgException &e)
-	{ 
-        std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl; 
-    }
+        std::cout << "\nRun arguments:" << "\n";
+        std::cout << "M = " << M << "\n";
+        std::cout << "N = " << N << "\n";
+        std::cout << "K = " << K << "\n";
+        std::cout << "trials = " << trials << "\n";
+    } catch (TCLAP::ArgException &e)
+    { std::cerr << "error: " << e.error() << " for arg " << e.argId() << "\n"; }
 
     // Initialize cuBLAS
     cublasHandle_t handle;
