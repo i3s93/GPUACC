@@ -1,11 +1,23 @@
 #include <iostream>
 #include <iomanip>
+#include <string>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include <random>
+
+// Argument parsing
+#include <tclap/CmdLine.h>
+
+// CUDA library
 #include <cuda.h>
 #include <cublas_v2.h>
 #include <omp.h>
+
+// Maps a tuple for a 2D array index to a 1D index (column-major order)
+// i is the row index, j is the column index, and ld is the leading dimension
+// For a column-major ordering, this is the number of rows
+#define IDX2C(i, j, ld) (((j) * (ld)) + (i))
 
 extern "C" {
     void dgemm_(const char* transa, const char* transb,
@@ -14,11 +26,6 @@ extern "C" {
                 const double* b, const int* ldb,
                 const double* beta, double* c, const int* ldc);
 }
-
-// Maps a tuple for a 2D array index to a 1D index (column-major order)
-// i is the row index, j is the column index, and ld is the leading dimension
-// For a column-major ordering, this is the number of rows
-#define IDX2C(i, j, ld) (((j) * (ld)) + (i))
 
 void checkCuda(cudaError_t result) {
     if (result != cudaSuccess) {
@@ -45,15 +52,89 @@ void checkCublas(cublasStatus_t result) {
     }
 }
 
-int main() {
+template<typename T>
+T min(const std::vector<T> &data){
+    T min_val = data[0];
+    for (const auto &item: data){
+        if (item < min_val) {
+            min_val = item;
+        }
+    }
+    return min_val;
+}
+
+template<typename T>
+T max(const std::vector<T> &data){
+    T max_val = data[0];
+    for (const auto &item: data){
+        if (item > max_val) {
+            max_val = item;
+        }
+    }
+    return max_val;
+}
+
+template<typename T>
+T mean(const std::vector<T> &data){
+    T sum = 0;
+    for (const auto &item: data){
+        sum += item;
+    }
+    return sum / static_cast<T>(data.size());
+}
+
+template<typename T>
+T stdev(const std::vector<T> &data){
+    T mean_val = mean(data);
+    T sum_squared_diff = 0;
+    for (const auto &item: data){
+        sum_squared_diff += std::pow(item - mean_val,2);
+    }
+    T denom = static_cast<T>(std::max(1, static_cast<int>(data.size() - 1)));
+    return std::sqrt(sum_squared_diff / denom);
+}
+
+template<typename T>
+void print_stats_summary(const std::string &device_name, const std::vector<T> &data){
+    std::cout << "Run statistics for " << device_name << std::endl;
+    std::cout << "Total number of samples taken: " << static_cast<int>(data.size()) << std::endl;
+    std::cout << std::scientific << std::setprecision(4) << "Mean runtime (ms): " << mean(data) << std::endl;
+    std::cout << std::scientific << std::setprecision(4) << "Min runtime (ms): " << min(data) << std::endl;
+    std::cout << std::scientific << std::setprecision(4) << "Max runtime (ms): " << max(data) << std::endl;
+    std::cout << std::scientific << std::setprecision(4) << "stdev: " << stdev(data) << std::endl;
+    return;
+}
+
+int main(int argc, char** argv) {
+
+    int M, N, K, trials;
+
+    try {
+    // Create each of the arguments
+    TCLAP::CmdLine cmd("Command description message", ' ', "1.0");
+    TCLAP::ValueArg<int> M_Arg("M", "", "Number of rows of A and C", false, 1024, "int", cmd);
+    TCLAP::ValueArg<int> N_Arg("N", "", "Number of columns of B and C", false, 1024, "int", cmd);
+    TCLAP::ValueArg<int> K_Arg("K", "", "Number of columns of A and rows of B", false, 1024, "int", cmd);
+    TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 10, "int", cmd);
+    
+	// Parse the argv array.
+	cmd.parse(argc, argv);
+
+    // Assign parsed values to variables
+    M = M_Arg.getValue();
+    N = N_Arg.getValue();
+    K = K_Arg.getValue();
+    trials = t_Arg.getValue();
+
+    // Catch any exceptions
+	} catch (TCLAP::ArgException &e)
+	{ 
+        std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl; 
+    }
+
     // Initialize cuBLAS
     cublasHandle_t handle;
     checkCublas(cublasCreate(&handle));
-
-    // Matrix dimensions (make these command line arguments)
-    int M = 1024; // Number of rows of A and C
-    int N = 1024; // Number of columns of B and C
-    int K = 1024; // Number of columns of A and rows of B
 
     // Allocate and initialize host matrices
     std::vector<double> A_h(M*K);
@@ -105,26 +186,36 @@ int main() {
     cudaEvent_t dgemm_start, dgemm_stop;
     cudaEventCreate(&dgemm_start);
     cudaEventCreate(&dgemm_stop);
+
+    // This needs to be a float (required by CUDA)
+    float dgemm_total_time;
+
+    // Container to hold the run data GPU
+    std::vector<float> dev_times;
     
-    // Record the start time
-    cudaEventRecord(dgemm_start);
+    for(int trial_idx = 0; trial_idx < trials; ++trial_idx){
 
-    checkCublas(cublasDgemm(handle, trans_A, trans_B, M, N, K, &alpha, A_d, M, B_d, K, &beta, C_d, M));
+        // Record the start time
+        cudaEventRecord(dgemm_start);
+        checkCublas(cublasDgemm(handle, trans_A, trans_B, M, N, K, &alpha, A_d, M, B_d, K, &beta, C_d, M));
+        cudaEventRecord(dgemm_stop);
 
-    cudaEventRecord(dgemm_stop);
+        // Ensure that the host waits until the device kernel completes
+        cudaEventSynchronize(dgemm_stop);
 
-    // Ensure that the host waits until the device kernel completes
-    cudaEventSynchronize(dgemm_stop);
+        // Stop the timer and print the elapsed time in milliseconds
+        cudaEventElapsedTime(&dgemm_total_time, dgemm_start, dgemm_stop);
 
-    // Stop the timer and print the elapsed time in milliseconds
-    float dgemm_total_time = 0; // This needs to be a float
-    cudaEventElapsedTime(&dgemm_total_time, dgemm_start, dgemm_stop);
+        // Save the timing data for later
+        dev_times.push_back(dgemm_total_time);
+    }
 
-    std::cout << std::scientific << std::setprecision(6) << "cuBLAS dgemm total time (ms): " << dgemm_total_time << std::endl;
+    print_stats_summary("GPU", dev_times);
 
-    // Copy result from device to host to check for correctness
+    // Copy result from device to host to check for correctness (later)
     checkCuda(cudaMemcpy(C_h.data(), C_d, M*N*sizeof(double), cudaMemcpyDeviceToHost));
 
+    // Variable to hold the output for the host result obtained with BLAS
     std::vector<double> C_exact(M*N, 0);
 
     // Compute the solution on the host side using BLAS
@@ -132,26 +223,24 @@ int main() {
     char transa = 'N';
     char transb = 'N';
 
-    double host_start_time = omp_get_wtime();
+    // Container to hold the run data CPU
+    std::vector<double> host_times;
 
-    dgemm_(&transa, &transb, &M, &N, &K, &alpha, A_h.data(), &M, B_h.data(), &N, &beta, C_exact.data(), &K);
+    for(int trial_idx = 0; trial_idx < trials; ++trial_idx){
 
-    double host_end_time = omp_get_wtime();
+        double host_start_time = omp_get_wtime();
+        dgemm_(&transa, &transb, &M, &N, &K, &alpha, A_h.data(), &M, B_h.data(), &N, &beta, C_exact.data(), &K);
+        double host_end_time = omp_get_wtime();
 
-    // Total time returned is in seconds, so we convert it to ms
-    double host_dgemm_total_time = host_end_time - host_start_time;
-    host_dgemm_total_time *= 1000;
+        // Total time returned is in seconds, so we convert it to ms
+        double host_dgemm_total_time = host_end_time - host_start_time;
+        host_dgemm_total_time *= 1000;
 
-    std::cout << std::scientific << std::setprecision(6) << "BLAS dgemm total time (ms): " << host_dgemm_total_time << std::endl;
-
-    // #pragma omp parallel for collapse(2)
-    // for (int j = 0; j < N; ++j) {
-    //     for (int k = 0; k < K; ++k) {
-    //         for (int i = 0; i < M; ++i) {
-    //             C_exact[IDX2C(i, j, M)] += A_h[IDX2C(i, k, M)] * B_h[IDX2C(k, j, K)];
-    //         }
-    //     }
-    // }
+        // Store the time data in a vector
+        host_times.push_back(host_dgemm_total_time);
+    }
+    
+    print_stats_summary("CPU", host_times);
 
     double max_error = 0;
 
@@ -162,7 +251,7 @@ int main() {
         }
     }
 
-    std::cout << "cuBLAS dgemm max error: " << max_error << std::endl;
+    std::cout << "dgemm max error (between host and device): " << max_error << std::endl;
 
     // Clean up the device arrays, events, and the cuBLAS handle
     checkCuda(cudaFree(A_d));

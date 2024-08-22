@@ -37,6 +37,7 @@ add_executable(dgemm_cuda cublas_dgemm.cu)
 # We also add a directory where these libraries are located
 target_link_libraries(dgemm_cuda PRIVATE CUDA::cublas OpenMP::OpenMP_CXX BLAS::BLAS)
 
+add_subdirectory(include/tclap)
 
 
 
