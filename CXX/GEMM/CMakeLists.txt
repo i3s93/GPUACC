@@ -36,9 +36,9 @@ find_package(CUDAToolkit REQUIRED)
 
 # Create the executable target for the CUDA code
 # The minimum should be C++ 11
-add_executable(dgemm_cuda cublas_dgemm.cu)
+add_executable(dgemm_ex dgemm_benchmark.cu)
 
-target_include_directories(dgemm_cuda PRIVATE include)
+target_include_directories(dgemm_ex PRIVATE include)
 
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
@@ -134,7 +134,7 @@ endif()
 
 # Link the libraries to the code
 # We also add a directory where these libraries are located
-target_link_libraries(dgemm_cuda PRIVATE compile-options CUDA::cublas OpenMP::OpenMP_CXX BLAS::BLAS)
+target_link_libraries(dgemm_ex PRIVATE compile-options CUDA::cublas OpenMP::OpenMP_CXX BLAS::BLAS)
 
 
 

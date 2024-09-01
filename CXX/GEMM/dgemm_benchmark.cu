@@ -12,6 +12,8 @@
 // CUDA library
 #include <cuda.h>
 #include <cublas_v2.h>
+
+// OpenMP
 #include <omp.h>
 
 // Maps a tuple for a 2D array index to a 1D index (column-major order)
@@ -29,7 +31,7 @@ extern "C" {
 
 void checkCuda(cudaError_t result) {
     if (result != cudaSuccess) {
-        std::cout << "CUDA Runtime Error: " << cudaGetErrorString(result) << std::endl;
+        std::cout << "CUDA Runtime Error: " << cudaGetErrorString(result) << "\n";
         exit(EXIT_FAILURE);
     }
 }
