@@ -1,0 +1,1 @@
+add_library(Collisions boltzmann_collisions.cpp)
