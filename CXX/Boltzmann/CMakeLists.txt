@@ -6,6 +6,7 @@ cmake_minimum_required(VERSION 3.18)
 # as the latter is deprecated.
 project(Boltzmann_Benchmark LANGUAGES C CXX)
 
+add_library(Boltzmann)
 add_subdirectory(Utilities)
 add_subdirectory(SphericalDesign)
 add_subdirectory(Collisions)
@@ -132,11 +133,10 @@ if(USE_AVX512)
     endif()
 endif()
 
+# Specify the location of the header files for the argument parser
+target_include_directories(maxwell_bkw_serial_ex PRIVATE Include)
 
 # Link the libraries to the code
 # Cray compilers automatically provide the link commands to fftw3 and other math libraries
-target_link_libraries(maxwell_bkw_serial_ex PUBLIC compile-options Utilities SphericalDesign Collisions)
-
-# Specify the location of the header files
-target_include_directories(maxwell_bkw_serial_ex PRIVATE Include Parameters Utilities SphericalDesign Collisions)
+target_link_libraries(maxwell_bkw_serial_ex PUBLIC compile-options Boltzmann)
 

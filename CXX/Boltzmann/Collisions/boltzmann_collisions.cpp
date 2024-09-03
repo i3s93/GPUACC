@@ -30,6 +30,7 @@ std::vector<std::complex<double>> beta1 = std::vector<std::complex<double>>(Nv*N
 std::vector<std::complex<double>> beta2 = std::vector<std::complex<double>>(Nv*Nv*Nv);
 
 // Allocations for the various transforms involved (including forward and backward)
+// These can be optimized with in-place transforms
 std::vector<std::complex<double>> f_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
 
 std::vector<std::complex<double>> alpha1_times_f = std::vector<std::complex<double>>(Nv*Nv*Nv);
@@ -48,6 +49,7 @@ std::vector<std::complex<double>> beta2_times_f = std::vector<std::complex<doubl
 std::vector<std::complex<double>> beta2_times_f_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
 
 // Convert the input distribution from double to complex
+// TO-DO: Once this works, convert things to r2c and c2r transforms
 std::vector<std::complex<double>> f(Nv*Nv*Nv);
 
 for (int i = 0; i < Nv; ++i){
@@ -65,38 +67,38 @@ for (int i = 0; i < Nv; ++i){
 // Creating plans for each of the transforms 
 // Start with FFTW_ESTIMATE, but use FFTW_PATIENT for faster transforms
 // Note: planning functions are not thread safe
-fftw_plan plan_f_hat = fftw_plan_dft_r2c_3d(Nv, Nv, Nv, 
-                                            reinterpret_cast<fftw_complex*>(&f[0]), 
-                                            reinterpret_cast<fftw_complex*>(&f_hat[0]),
-                                            FFTW_FORWARD, FFTW_ESTIMATE);
+fftw_plan fft_f = fftw_plan_dft_r2c_3d(Nv, Nv, Nv, 
+                                        reinterpret_cast<fftw_complex*>(&f[0]), 
+                                        reinterpret_cast<fftw_complex*>(&f_hat[0]),
+                                        FFTW_FORWARD, FFTW_ESTIMATE);
 
-fftw_plan plan_alpha1_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                                     reinterpret_cast<fftw_complex*>(&alpha1_times_f_hat[0]), 
-                                                     reinterpret_cast<fftw_complex*>(&alpha1_times_f[0]),
-                                                     FFTW_BACKWARD, FFTW_ESTIMATE);
+fftw_plan ifft_alpha1_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
+                                                    reinterpret_cast<fftw_complex*>(&alpha1_times_f_hat[0]), 
+                                                    reinterpret_cast<fftw_complex*>(&alpha1_times_f[0]),
+                                                    FFTW_BACKWARD, FFTW_ESTIMATE);
 
-fftw_plan plan_alpha2_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                                     reinterpret_cast<fftw_complex*>(&alpha2_times_f_hat[0]), 
-                                                     reinterpret_cast<fftw_complex*>(&alpha2_times_f[0]),
-                                                     FFTW_BACKWARD, FFTW_ESTIMATE);
+fftw_plan ifft_alpha2_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
+                                                    reinterpret_cast<fftw_complex*>(&alpha2_times_f_hat[0]), 
+                                                    reinterpret_cast<fftw_complex*>(&alpha2_times_f[0]),
+                                                    FFTW_BACKWARD, FFTW_ESTIMATE);
 
-fftw_plan plan_fft_products = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                               reinterpret_cast<fftw_complex*>(&transform_prod[0]), 
-                                               reinterpret_cast<fftw_complex*>(&transform_prod_hat[0]),
-                                               FFTW_FORWARD, FFTW_ESTIMATE);
+fftw_plan fft_product = fftw_plan_dft_3d(Nv, Nv, Nv, 
+                                        reinterpret_cast<fftw_complex*>(&transform_prod[0]), 
+                                        reinterpret_cast<fftw_complex*>(&transform_prod_hat[0]),
+                                        FFTW_FORWARD, FFTW_ESTIMATE);
 
-fftw_plan plan_Q_gain = fftw_plan_dft_3d(Nv, Nv, Nv,
-                                         reinterpret_cast<fftw_complex*>(&Q_gain_hat[0]),
-                                         reinterpret_cast<fftw_complex*>(&Q_gain[0]),
-                                         FFTW_BACKWARD, FFTW_ESTIMATE);
+fftw_plan ifft_Q_gain_hat = fftw_plan_dft_3d(Nv, Nv, Nv,
+                                            reinterpret_cast<fftw_complex*>(&Q_gain_hat[0]),
+                                            reinterpret_cast<fftw_complex*>(&Q_gain[0]),
+                                            FFTW_BACKWARD, FFTW_ESTIMATE);
 
-fftw_plan plan_Q_loss = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                         reinterpret_cast<fftw_complex*>(&beta2_times_f_hat[0]), 
-                                         reinterpret_cast<fftw_complex*>(&beta2_times_f[0]),
-                                         FFTW_BACKWARD, FFTW_ESTIMATE);
+fftw_plan ifft_Q_loss_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
+                                            reinterpret_cast<fftw_complex*>(&beta2_times_f_hat[0]), 
+                                            reinterpret_cast<fftw_complex*>(&beta2_times_f[0]),
+                                            FFTW_BACKWARD, FFTW_ESTIMATE);
 
 // Transform f to get f_hat
-fftw_execute(plan_f_hat);
+fftw_execute(fft_f);
 
 for (int r = 0; r < Nr; ++r){
     for (int s = 0; s < Ns; ++s){
@@ -118,20 +120,23 @@ for (int r = 0; r < Nr; ++r){
         }
 
         // Invert the weighted transforms of f
-        fftw_execute(plan_alpha1_times_f_hat);
-        fftw_execute(plan_alpha2_times_f_hat);
+        // These are not normalized, so we need to divide by the number of elements later
+        fftw_execute(ifft_alpha1_times_f_hat);
+        fftw_execute(ifft_alpha2_times_f_hat);
 
         // Compute the product of the transforms in physical space
         for (int i = 0; i < Nv; ++i){
             for (int j = 0; j < Nv; ++j){
                 for (int k = 0; k < Nv; ++k){
+                    double normalization = 1/(Nv*Nv*Nv);
                     transform_prod[IDX(i,j,k,Nv,Nv)] = alpha1_times_f[IDX(i,j,k,Nv,Nv)]*alpha2_times_f[IDX(i,j,k,Nv,Nv)];
+                    transform_prod[IDX(i,j,k,Nv,Nv)] *= std::pow(normalization,2);
                 }
             }
         }
 
         // Transform the product back to the frequency domain
-        fftw_execute(plan_fft_products);
+        fftw_execute(fft_product);
 
         // Update the gain term in the frequency domain 
         for (int i = 0; i < Nv; ++i){
@@ -165,27 +170,32 @@ for (int i = 0; i < Nv; ++i){
 }
 
 // Transform Q_gain back to physical space
-fftw_execute(plan_Q_gain);
+// This needs to be normalized
+fftw_execute(ifft_Q_gain_hat);
 
 // Transform beta2_times_f_hat back to physical space
-fftw_execute(plan_Q_loss);
+// This also needs to be normalized
+fftw_execute(ifft_Q_loss_hat);
 
 // Compute the final form for Q = real(Q_gain - Q_loss)
+// We include the above normalizations here as we build Q
 for (int i = 0; i < Nv; ++i){
     for (int j = 0; j < Nv; ++j){
         for (int k = 0; k < Nv; ++k){
-            std::complex<double> Q_loss = beta2_times_f[IDX(i,j,k,Nv,Nv)]*f[IDX(i,j,k,Nv,Nv)];
+            double normalization = 1/(Nv*Nv*Nv);
+            std::complex<double> Q_loss = normalization*beta2_times_f[IDX(i,j,k,Nv,Nv)]*f[IDX(i,j,k,Nv,Nv)];
+            Q_gain[IDX(i,j,k,Nv,Nv)] *= normalization;
             Q[IDX(i,j,k,Nv,Nv)] = Q_gain[IDX(i,j,k,Nv,Nv)].real() - Q_loss.real();
         }
     }
 }
 
 // Destory the plans for each of the transforms
-fftw_destroy_plan(plan_f_hat);
-fftw_destroy_plan(plan_alpha1_times_f_hat);
-fftw_destroy_plan(plan_alpha2_times_f_hat);
-fftw_destroy_plan(plan_fft_products);
-fftw_destroy_plan(plan_Q_gain);
-fftw_destroy_plan(plan_Q_loss);
+fftw_destroy_plan(fft_f);
+fftw_destroy_plan(ifft_alpha1_times_f_hat);
+fftw_destroy_plan(ifft_alpha2_times_f_hat);
+fftw_destroy_plan(fft_product);
+fftw_destroy_plan(ifft_Q_gain_hat);
+fftw_destroy_plan(ifft_Q_loss_hat);
 
 }

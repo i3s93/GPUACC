@@ -1,1 +1,3 @@
-add_library(Collisions boltzmann_collisions.cpp)
+target_sources(Boltzmann PRIVATE
+                boltzmann_collisions.hpp
+                boltzmann_collisions.cpp)

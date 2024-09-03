@@ -10,7 +10,7 @@
 #include <omp.h>
 
 #include "SphericalDesign/spherical_design.hpp"
-#include "Parameters/parameters.hpp"
+#include "Utilities/parameters.hpp"
 #include "Utilities/statistics.hpp"
 #include "Utilities/Solver_Manager.hpp"
 #include "Utilities/gauss_legendre.hpp"

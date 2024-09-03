@@ -9,7 +9,7 @@
 #include <fftw3.h>
 
 #include "../Utilities/Solver_Manager.hpp"
-#include "../Parameters/parameters.hpp"
+#include "../Utilities/parameters.hpp"
 
 // Map from tuple to index assuming Nv points are used in each dimension using row-major ordering
 #define IDX(i1, i2, i3, N1, N2) ((i1*N1+i2)*N2 + i3)
