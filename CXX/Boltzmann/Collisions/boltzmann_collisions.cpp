@@ -1,7 +1,7 @@
 #include "boltzmann_collisions.hpp"
 
 void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
-                                   const std::vector<double> &f_in,
+                                   std::vector<double> &f_in,
                                    const SolverManager &sm, const SolverParameters &sp,
                                    const double b_gamma, const double gamma){
 
@@ -67,34 +67,34 @@ for (int i = 0; i < Nv; ++i){
 // Creating plans for each of the transforms 
 // Start with FFTW_ESTIMATE, but use FFTW_PATIENT for faster transforms
 // Note: planning functions are not thread safe
-fftw_plan fft_f = fftw_plan_dft_r2c_3d(Nv, Nv, Nv, 
-                                        reinterpret_cast<fftw_complex*>(&f[0]), 
-                                        reinterpret_cast<fftw_complex*>(&f_hat[0]),
-                                        FFTW_FORWARD, FFTW_ESTIMATE);
+fftw_plan fft_f = fftw_plan_dft_3d(Nv, Nv, Nv, 
+                                   reinterpret_cast<fftw_complex*>(f.data()), 
+                                   reinterpret_cast<fftw_complex*>(f_hat.data()),
+                                   FFTW_FORWARD, FFTW_ESTIMATE);
 
 fftw_plan ifft_alpha1_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                                    reinterpret_cast<fftw_complex*>(&alpha1_times_f_hat[0]), 
-                                                    reinterpret_cast<fftw_complex*>(&alpha1_times_f[0]),
+                                                    reinterpret_cast<fftw_complex*>(alpha1_times_f_hat.data()), 
+                                                    reinterpret_cast<fftw_complex*>(alpha1_times_f.data()),
                                                     FFTW_BACKWARD, FFTW_ESTIMATE);
 
 fftw_plan ifft_alpha2_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                                    reinterpret_cast<fftw_complex*>(&alpha2_times_f_hat[0]), 
-                                                    reinterpret_cast<fftw_complex*>(&alpha2_times_f[0]),
+                                                    reinterpret_cast<fftw_complex*>(alpha2_times_f_hat.data()), 
+                                                    reinterpret_cast<fftw_complex*>(alpha2_times_f.data()),
                                                     FFTW_BACKWARD, FFTW_ESTIMATE);
 
 fftw_plan fft_product = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                        reinterpret_cast<fftw_complex*>(&transform_prod[0]), 
-                                        reinterpret_cast<fftw_complex*>(&transform_prod_hat[0]),
+                                        reinterpret_cast<fftw_complex*>(transform_prod.data()), 
+                                        reinterpret_cast<fftw_complex*>(transform_prod_hat.data()),
                                         FFTW_FORWARD, FFTW_ESTIMATE);
 
 fftw_plan ifft_Q_gain_hat = fftw_plan_dft_3d(Nv, Nv, Nv,
-                                            reinterpret_cast<fftw_complex*>(&Q_gain_hat[0]),
-                                            reinterpret_cast<fftw_complex*>(&Q_gain[0]),
+                                            reinterpret_cast<fftw_complex*>(Q_gain_hat.data()),
+                                            reinterpret_cast<fftw_complex*>(Q_gain.data()),
                                             FFTW_BACKWARD, FFTW_ESTIMATE);
 
 fftw_plan ifft_Q_loss_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
-                                            reinterpret_cast<fftw_complex*>(&beta2_times_f_hat[0]), 
-                                            reinterpret_cast<fftw_complex*>(&beta2_times_f[0]),
+                                            reinterpret_cast<fftw_complex*>(beta2_times_f_hat.data()), 
+                                            reinterpret_cast<fftw_complex*>(beta2_times_f.data()),
                                             FFTW_BACKWARD, FFTW_ESTIMATE);
 
 // Transform f to get f_hat

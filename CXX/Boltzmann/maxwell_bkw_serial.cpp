@@ -26,8 +26,8 @@ int main(int argc, char** argv) {
     try {
         // Create each of the arguments
         TCLAP::CmdLine cmd("Command description message", ' ', "1.0");
-        TCLAP::ValueArg<int> Nv_Arg("Nv", "Nv_size", "Number of points per dimension in velocity", false, 32, "int");
-        TCLAP::ValueArg<int> Ns_Arg("Ns", "Ns_size", "Number of points on the unit sphere", false, 12, "int");
+        TCLAP::ValueArg<int> Nv_Arg("", "Nv", "Number of points per dimension in velocity", false, 32, "int");
+        TCLAP::ValueArg<int> Ns_Arg("", "Ns", "Number of points on the unit sphere", false, 12, "int");
         TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 10, "int");
 
         cmd.add(Nv_Arg);
@@ -105,13 +105,16 @@ int main(int argc, char** argv) {
 
     // Compute the quadrature rules and store their information in the solver
     SolverManager sm;
-    gauss_legendre(params.Nr, sm.nodes_gl, sm.wts_gl);
+    gauss_legendre(sp.Nr, sm.nodes_gl, sm.wts_gl);
 
     SphericalDesign sd = get_spherical_design(Ns);
     sm.sigma1_sph = sd.x;
     sm.sigma2_sph = sd.y;
     sm.sigma3_sph = sd.z;
-    sm.wts_sph = std::vector<double>(params.Ns, 1/(4*pi));
+    sm.wts_sph = std::vector<double>(sp.Ns, 1/(4*pi));
+
+    // Check the quadrature for errors
+    print_spherical_design(sd);
 
     // Precompute and store the wave numbers for the transform as a tensor product
     std::vector<int> l;
@@ -125,6 +128,12 @@ int main(int argc, char** argv) {
     // Second half: -N/2 to -1  
     for (int i = -Nv/2; i < 0; ++i){
         l.push_back(i);
+    }
+
+    std::cout << "Printing the wave number array l:\n";
+
+    for (auto &item:l){
+        std::cout << item << "\n";
     }
 
     sm.l1 = l;

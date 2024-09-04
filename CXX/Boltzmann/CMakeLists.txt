@@ -138,5 +138,5 @@ target_include_directories(maxwell_bkw_serial_ex PRIVATE Include)
 
 # Link the libraries to the code
 # Cray compilers automatically provide the link commands to fftw3 and other math libraries
-target_link_libraries(maxwell_bkw_serial_ex PUBLIC compile-options Boltzmann)
+target_link_libraries(maxwell_bkw_serial_ex PRIVATE compile-options Boltzmann OpenMP::OpenMP_CXX)
 

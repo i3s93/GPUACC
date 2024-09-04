@@ -6,15 +6,15 @@ SphericalDesign get_spherical_design(int N) {
     
     switch (N) {
 
-        case 6:   filename = "ss003.006.txt"; break;
-        case 12:  filename = "ss005.012.txt"; break;
-        case 32:  filename = "ss007.032.txt"; break;
-        case 48:  filename = "ss009.048.txt"; break;
-        case 70:  filename = "ss011.070.txt"; break;
-        case 94:  filename = "ss013.094.txt"; break;
-        case 120: filename = "ss015.120.txt"; break;
-        case 156: filename = "ss017.156.txt"; break;
-        case 192: filename = "ss019.192.txt"; break;
+        case 6:   filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss003.006.txt"; break;
+        case 12:  filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss005.012.txt"; break;
+        case 32:  filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss007.032.txt"; break;
+        case 48:  filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss009.048.txt"; break;
+        case 70:  filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss011.070.txt"; break;
+        case 94:  filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss013.094.txt"; break;
+        case 120: filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss015.120.txt"; break;
+        case 156: filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss017.156.txt"; break;
+        case 192: filename = "/global/homes/w/wsands/Projects/GPUACC/CXX/Boltzmann/SphericalDesign/ss019.192.txt"; break;
         default: 
             throw std::invalid_argument("Invalid value of N");
 
@@ -22,7 +22,7 @@ SphericalDesign get_spherical_design(int N) {
 
     std::ifstream file(filename);
 
-    if (!file) {
+    if (!file.is_open()) {
         throw std::runtime_error("Could not open file " + filename);
     }
 
@@ -59,7 +59,7 @@ void print_spherical_design(const SphericalDesign & sd){
     std::cout << "\nQuadrature points being used: " << Ns << "\n";
 
     for (int i = 0; i < Ns; ++i){
-        std::cout << sd.x[i] << sd.y[i] << sd.z[i] << "\n";
+        std::cout << sd.x[i] << " " << sd.y[i] << " " <<  sd.z[i] << "\n";
     }
 
 }
