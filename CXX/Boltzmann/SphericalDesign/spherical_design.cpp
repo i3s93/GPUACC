@@ -59,7 +59,7 @@ void print_spherical_design(const SphericalDesign & sd){
     std::cout << "\nQuadrature points being used: " << Ns << "\n";
 
     for (int i = 0; i < Ns; ++i){
-        std::cout << sd.x[i] << " " << sd.y[i] << " " <<  sd.z[i] << "\n";
+        std::cout << sd.x[i] << "\t" << sd.y[i] << "\t" <<  sd.z[i] << "\n";
     }
 
 }

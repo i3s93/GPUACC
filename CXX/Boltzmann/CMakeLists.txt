@@ -6,6 +6,9 @@ cmake_minimum_required(VERSION 3.18)
 # as the latter is deprecated.
 project(Boltzmann_Benchmark LANGUAGES C CXX)
 
+find_package(OpenMP REQUIRED)
+#find_package(CUDAToolkit REQUIRED)
+
 add_library(Boltzmann)
 add_subdirectory(Utilities)
 add_subdirectory(SphericalDesign)
@@ -34,10 +37,6 @@ option(CMAKE_CUDA_STANDARD_REQUIRED "Require the CUDA language standard to set" 
 option(CMAKE_C_EXTENSIONS    "Enable/disable extensions, e.g. -std=gnu11 vs. -std=c11"     OFF)
 option(CMAKE_CXX_EXTENSIONS  "Enable/disable extensions, e.g. -std=gnu++11 vs. -std=c++11" OFF)
 option(CMAKE_CUDA_EXTENSIONS "Enable/disable extensions" OFF)
-
-find_package(OpenMP REQUIRED)
-#find_package(CUDAToolkit REQUIRED)
-
 
 # Create the executable targets for the different codes
 add_executable(maxwell_bkw_serial_ex maxwell_bkw_serial.cpp)

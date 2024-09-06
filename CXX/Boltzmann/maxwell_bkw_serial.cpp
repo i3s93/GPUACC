@@ -105,16 +105,21 @@ int main(int argc, char** argv) {
 
     // Compute the quadrature rules and store their information in the solver
     SolverManager sm;
-    gauss_legendre(sp.Nr, sm.nodes_gl, sm.wts_gl);
+    get_gauss_legendre_rule(sp.Nr, sm.nodes_gl, sm.wts_gl, 0, sp.R);
+
+    // Print out the GL nodes and weights
+    for (int i = 0; i < sp.Nr; ++i){
+        std::cout << "(wts, nodes) = (" << sm.wts_gl[i] << ", " << sm.nodes_gl[i]  << ")\n";
+    }
 
     SphericalDesign sd = get_spherical_design(Ns);
     sm.sigma1_sph = sd.x;
     sm.sigma2_sph = sd.y;
     sm.sigma3_sph = sd.z;
-    sm.wts_sph = std::vector<double>(sp.Ns, 1/(4*pi));
+    sm.wts_sph = std::vector<double>(sp.Ns, (4*pi)/sp.Ns);
 
     // Check the quadrature for errors
-    print_spherical_design(sd);
+    // print_spherical_design(sd);
 
     // Precompute and store the wave numbers for the transform as a tensor product
     std::vector<int> l;
@@ -128,12 +133,6 @@ int main(int argc, char** argv) {
     // Second half: -N/2 to -1  
     for (int i = -Nv/2; i < 0; ++i){
         l.push_back(i);
-    }
-
-    std::cout << "Printing the wave number array l:\n";
-
-    for (auto &item:l){
-        std::cout << item << "\n";
     }
 
     sm.l1 = l;
