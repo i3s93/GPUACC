@@ -4,3 +4,7 @@ target_sources(Boltzmann PRIVATE
                 Solver_Manager.hpp
                 gauss_legendre.hpp
                 gauss_legendre.cpp)
+
+find_package(GSL REQUIRED)
+
+target_link_libraries(Boltzmann PUBLIC GSL::gsl GSL::gslcblas)
