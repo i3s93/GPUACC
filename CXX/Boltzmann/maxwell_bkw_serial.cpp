@@ -95,8 +95,8 @@ int main(int argc, char** argv) {
                 f_bkw[IDX(i, j, k, Nv, Nv)] *= 1/(2*std::pow(2*pi*K, 1.5));
 
                 // Compute the derivative of f
-                Q_bkw[IDX(i, j, k, Nv, Nv)] = -3/(2*K) + (r_sq/(2*std::pow(K,2)))*f_bkw[IDX(i, j, k, Nv, Nv)];
-                Q_bkw[IDX(i, j, k, Nv, Nv)] += 1/(2*std::pow(2*pi*K, 1.5))*std::exp(-(r_sq)/(2*K))*(3/(std::pow(K,2))+(K-2)/(std::pow(K,3))*r_sq);
+                Q_bkw[IDX(i, j, k, Nv, Nv)] = (-3/(2*K) + r_sq/(2*std::pow(K,2)))*f_bkw[IDX(i, j, k, Nv, Nv)];
+                Q_bkw[IDX(i, j, k, Nv, Nv)] += 1/(2*std::pow(2*pi*K, 1.5))*std::exp(-r_sq/(2*K))*(3/(std::pow(K,2)) + (K-2)/(std::pow(K,3))*r_sq);
                 Q_bkw[IDX(i, j, k, Nv, Nv)] *= dK;
 
             }
@@ -107,10 +107,12 @@ int main(int argc, char** argv) {
     SolverManager sm;
     get_gauss_legendre_rule(sp.Nr, sm.nodes_gl, sm.wts_gl, 0, sp.R);
 
+    /*
     // Print out the GL nodes and weights
     for (int i = 0; i < sp.Nr; ++i){
         std::cout << "(wts, nodes) = (" << sm.wts_gl[i] << ", " << sm.nodes_gl[i]  << ")\n";
     }
+    */
 
     SphericalDesign sd = get_spherical_design(Ns);
     sm.sigma1_sph = sd.x;
@@ -127,13 +129,32 @@ int main(int argc, char** argv) {
     
     // First half: 0 to N/2 - 1
     for (int i = 0; i < Nv/2; ++i){
+        // std::cout << i << "\n";
         l.push_back(i);
     }
 
     // Second half: -N/2 to -1  
     for (int i = -Nv/2; i < 0; ++i){
+        // std::cout << i << "\n";
         l.push_back(i);
     }
+
+    /*
+    std::cout << "\n";
+
+    // Check a slices of the input
+    for (int j = 0; j < Nv; ++j){
+        std::cout << "f_bkw(15,j,15) at j = " << j << ": " << f_bkw[IDX(15, j, 15, Nv, Nv)] << "\n"; 
+    }
+
+    std::cout << "\n\n";
+
+    for (int j = 0; j < Nv; ++j){
+        std::cout << "Q_bkw(15,j,15) at j = " << j << ": " << Q_bkw[IDX(15, j, 15, Nv, Nv)] << "\n"; 
+    }
+  
+
+    */
 
     sm.l1 = l;
     sm.l2 = l;
@@ -192,6 +213,6 @@ int main(int argc, char** argv) {
     std::cout << "L1 error: " << err_L1 << "\n";
     std::cout << "L2 error: " << err_L2 << "\n";
     std::cout << "Linf error: " << err_Linf << "\n\n";
-
+    
     return 0;
 }
