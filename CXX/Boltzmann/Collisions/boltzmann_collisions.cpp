@@ -107,20 +107,26 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
             for (int i = 0; i < Nv; ++i){
                 for (int j = 0; j < Nv; ++j){
                     for (int k = 0; k < Nv; ++k){
+
+                        int idx = IDX(i,j,k,Nv,Nv);
                         double l_dot_sigma = l1[i]*sigma1[s] + l2[j]*sigma2[s] + l3[k]*sigma3[s];
+                        double norm_l = std::sqrt(std::pow(l1[i],2) + std::pow(l2[j],2) + std::pow(l3[k],2));
+
                         std::complex<double> alpha1 = std::exp(std::complex<double>(0,-(pi/(2*L))*nodes_gl[r]*l_dot_sigma));
                         std::complex<double> alpha2 = std::conj(alpha1);
-                        double norm_l = std::sqrt(std::pow(l1[i],2) + std::pow(l2[j],2) + std::pow(l3[k],2));
-                        
-                        alpha1_times_f_hat[IDX(i,j,k,Nv,Nv)] = alpha1*f_hat[IDX(i,j,k,Nv,Nv)];
-                        alpha2_times_f_hat[IDX(i,j,k,Nv,Nv)] = alpha2*f_hat[IDX(i,j,k,Nv,Nv)];
-                        beta1[IDX(i,j,k,Nv,Nv)] = 4*pi*b_gamma*sincc(pi*nodes_gl[r]*norm_l/(2*L));
+
+                        // We normalize the transforms here before taking the ifft
+                        double norm_fft = 1/(Nv*Nv*Nv);
+                        alpha1_times_f_hat[idx] = norm_fft*alpha1*f_hat[idx];
+                        alpha2_times_f_hat[idx] = norm_fft*alpha2*f_hat[idx];
+                    
+                        beta1[idx] = 4*pi*b_gamma*sincc(pi*nodes_gl[r]*norm_l/(2*L));
+
                     }
                 }
             }
 
-            // Invert the weighted transforms of f
-            // These are not normalized, so we need to divide by the number of elements later
+            // Invert the weighted transforms of f (normalized prior to execution)
             fftw_execute(ifft_alpha1_times_f_hat);
             fftw_execute(ifft_alpha2_times_f_hat);
 
@@ -128,9 +134,10 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
             for (int i = 0; i < Nv; ++i){
                 for (int j = 0; j < Nv; ++j){
                     for (int k = 0; k < Nv; ++k){
-                        double normalization = 1/(Nv*Nv*Nv);
-                        transform_prod[IDX(i,j,k,Nv,Nv)] = alpha1_times_f[IDX(i,j,k,Nv,Nv)]*alpha2_times_f[IDX(i,j,k,Nv,Nv)];
-                        transform_prod[IDX(i,j,k,Nv,Nv)] *= std::pow(normalization,2);
+
+                        int idx = IDX(i,j,k,Nv,Nv);
+                        transform_prod[idx] = alpha1_times_f[idx]*alpha2_times_f[idx];
+
                     }
                 }
             }
@@ -138,33 +145,45 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
             // Transform the product back to the frequency domain
             fftw_execute(fft_product);
 
-            // Update the gain term in the frequency domain 
+            // Update the gain term in the frequency domain
+            // Each term that is added is normalized 
             for (int i = 0; i < Nv; ++i){
                 for (int j = 0; j < Nv; ++j){
                     for (int k = 0; k < Nv; ++k){
-                        Q_gain[IDX(i,j,k,Nv,Nv)] += wts_gl[r]*wts_sph[s]*std::pow(nodes_gl[r],gamma+2)*beta1[IDX(i,j,k,Nv,Nv)]*transform_prod[IDX(i,j,k,Nv,Nv)];
+
+                        int idx = IDX(i,j,k,Nv,Nv);
+                        double norm_fft = 1/(Nv*Nv*Nv);
+                        Q_gain_hat[idx] += norm_fft*wts_gl[r]*wts_sph[s]*std::pow(nodes_gl[r],gamma+2)*beta1[idx]*transform_prod_hat[idx];
+
                     }
                 }
             }
-        }
+        } // End of spherical loop
 
         // Compute the complex weights beta2
         for (int i = 0; i < Nv; ++i){
             for (int j = 0; j < Nv; ++j){
                 for (int k = 0; k < Nv; ++k){
+
+                    int idx = IDX(i,j,k,Nv,Nv);
                     double norm_l = std::sqrt(std::pow(l1[i],2) + std::pow(l2[j],2) + std::pow(l3[k],2));
-                    beta2[IDX(i,j,k,Nv,Nv)] += 16*std::pow(pi,2)*b_gamma*wts_gl[r]*std::pow(nodes_gl[r], gamma+2)*sincc(pi*nodes_gl[r]*norm_l/L);
+                    beta2[idx] += 16*std::pow(pi,2)*b_gamma*wts_gl[r]*std::pow(nodes_gl[r], gamma+2)*sincc(pi*nodes_gl[r]*norm_l/L);
+
                 }
             }
         }
 
-    }
+    } // End of radial loop
 
-    // Apply weights beta2 to f_hat
+    // Apply weights beta2 to f_hat and normalize
     for (int i = 0; i < Nv; ++i){
         for (int j = 0; j < Nv; ++j){
             for (int k = 0; k < Nv; ++k){
-                beta2_times_f_hat[IDX(i,j,k,Nv,Nv)] = beta2[IDX(i,j,k,Nv,Nv)]*f_hat[IDX(i,j,k,Nv,Nv)];
+
+                int idx = IDX(i,j,k,Nv,Nv);
+                double norm_fft = 1/(Nv*Nv*Nv);
+                beta2_times_f_hat[idx] = norm_fft*beta2[idx]*f_hat[idx];
+
             }
         }
     }
@@ -178,14 +197,14 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     fftw_execute(ifft_Q_loss_hat);
 
     // Compute the final form for Q = real(Q_gain - Q_loss)
-    // We include the above normalizations here as we build Q
     for (int i = 0; i < Nv; ++i){
         for (int j = 0; j < Nv; ++j){
             for (int k = 0; k < Nv; ++k){
-                double normalization = 1/(Nv*Nv*Nv);
-                std::complex<double> Q_loss = normalization*beta2_times_f[IDX(i,j,k,Nv,Nv)]*f[IDX(i,j,k,Nv,Nv)];
-                Q_gain[IDX(i,j,k,Nv,Nv)] *= normalization;
-                Q[IDX(i,j,k,Nv,Nv)] = Q_gain[IDX(i,j,k,Nv,Nv)].real() - Q_loss.real();
+
+                int idx = IDX(i,j,k,Nv,Nv);
+                std::complex<double> Q_loss_ijk = beta2_times_f[idx]*f[idx];
+                Q[idx] = Q_gain[idx].real() - Q_loss_ijk.real();
+
             }
         }
     }

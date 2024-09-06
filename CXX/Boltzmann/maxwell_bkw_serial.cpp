@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
         TCLAP::CmdLine cmd("Command description message", ' ', "1.0");
         TCLAP::ValueArg<int> Nv_Arg("", "Nv", "Number of points per dimension in velocity", false, 32, "int");
         TCLAP::ValueArg<int> Ns_Arg("", "Ns", "Number of points on the unit sphere", false, 12, "int");
-        TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 10, "int");
+        TCLAP::ValueArg<int> t_Arg("t", "trials", "Number of trials to use for statistics", false, 1, "int");
 
         cmd.add(Nv_Arg);
         cmd.add(Ns_Arg);
