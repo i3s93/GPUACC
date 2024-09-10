@@ -26,31 +26,35 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     std::vector<int> l3 = sm.l3;
 
     // Temporary for weights used to compute the loss term
-    std::vector<std::complex<double>> beta1 = std::vector<std::complex<double>>(Nv*Nv*Nv);
-    std::vector<std::complex<double>> beta2 = std::vector<std::complex<double>>(Nv*Nv*Nv);
+    int grid_size = Nv*Nv*Nv;
+    std::vector<std::complex<double>> beta1 = std::vector<std::complex<double>>(grid_size, 0);
+    std::vector<std::complex<double>> beta2 = std::vector<std::complex<double>>(grid_size, 0);
 
     // Allocations for the various transforms involved (including forward and backward)
-    // These can be optimized with in-place transforms
-    std::vector<std::complex<double>> f_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
+    std::vector<std::complex<double>> f_hat = std::vector<std::complex<double>>(grid_size, 0);
 
-    std::vector<std::complex<double>> alpha1_times_f = std::vector<std::complex<double>>(Nv*Nv*Nv);
-    std::vector<std::complex<double>> alpha1_times_f_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
+    std::vector<std::complex<double>> alpha1_times_f = std::vector<std::complex<double>>(grid_size, 0);
+    std::vector<std::complex<double>> alpha1_times_f_hat = std::vector<std::complex<double>>(grid_size, 0);
 
-    std::vector<std::complex<double>> alpha2_times_f = std::vector<std::complex<double>>(Nv*Nv*Nv);
-    std::vector<std::complex<double>> alpha2_times_f_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
+    std::vector<std::complex<double>> alpha2_times_f = std::vector<std::complex<double>>(grid_size, 0);
+    std::vector<std::complex<double>> alpha2_times_f_hat = std::vector<std::complex<double>>(grid_size, 0);
 
-    std::vector<std::complex<double>> transform_prod = std::vector<std::complex<double>>(Nv*Nv*Nv);
-    std::vector<std::complex<double>> transform_prod_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
+    std::vector<std::complex<double>> transform_prod = std::vector<std::complex<double>>(grid_size, 0);
+    std::vector<std::complex<double>> transform_prod_hat = std::vector<std::complex<double>>(grid_size, 0);
 
-    std::vector<std::complex<double>> Q_gain = std::vector<std::complex<double>>(Nv*Nv*Nv, 0);
-    std::vector<std::complex<double>> Q_gain_hat = std::vector<std::complex<double>>(Nv*Nv*Nv, 0);
+    std::vector<std::complex<double>> Q_gain = std::vector<std::complex<double>>(grid_size, 0);
+    std::vector<std::complex<double>> Q_gain_hat = std::vector<std::complex<double>>(grid_size, 0);
 
-    std::vector<std::complex<double>> beta2_times_f = std::vector<std::complex<double>>(Nv*Nv*Nv, 0);
-    std::vector<std::complex<double>> beta2_times_f_hat = std::vector<std::complex<double>>(Nv*Nv*Nv);
+    std::vector<std::complex<double>> beta2_times_f = std::vector<std::complex<double>>(grid_size, 0);
+    std::vector<std::complex<double>> beta2_times_f_hat = std::vector<std::complex<double>>(grid_size, 0);
+
+    // Since FFTW is not normalized, we need to compute the scaling applied in the inverse FFT
+    // Be careful to avoid integer arithmetic
+    double fft_scale = 1.0/grid_size;
 
     // Convert the input distribution from double to complex
     // TO-DO: Once this works, convert things to r2c and c2r transforms
-    std::vector<std::complex<double>> f(Nv*Nv*Nv);
+    std::vector<std::complex<double>> f(grid_size, 0);
 
     for (int i = 0; i < Nv; ++i){
         for (int j = 0; j < Nv; ++j){
@@ -60,13 +64,13 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
         }
     }
 
-    // if(fftw_import_wisdom_from_filename(fname.c_str()) == 0){
-    //     std::cout << "Failed to import wisdom from file: " << fname << "\n";
-    // }
+    std::string fname("fftw_wisdom.dat");
+
+    if(fftw_import_wisdom_from_filename(fname.c_str()) == 0){
+        std::cout << "Failed to import wisdom from file: " << fname << "\n";
+    }
 
     // Creating plans for each of the transforms 
-    // Start with FFTW_ESTIMATE, but use FFTW_PATIENT for faster transforms
-    // Note: planning functions are not thread safe
     fftw_plan fft_f = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                        reinterpret_cast<fftw_complex*>(f.data()), 
                                        reinterpret_cast<fftw_complex*>(f_hat.data()),
@@ -92,14 +96,26 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
                                                 reinterpret_cast<fftw_complex*>(Q_gain.data()),
                                                 FFTW_BACKWARD, FFTW_ESTIMATE);
 
-    fftw_plan ifft_Q_loss_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
+    fftw_plan ifft_beta2_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                                 reinterpret_cast<fftw_complex*>(beta2_times_f_hat.data()), 
                                                 reinterpret_cast<fftw_complex*>(beta2_times_f.data()),
                                                 FFTW_BACKWARD, FFTW_ESTIMATE);
 
+    // Export wisdom immediately after plan creation
+    fftw_export_wisdom_to_filename(fname.c_str());    
+
+    // Initialize the input as a complex array
+    for (int i = 0; i < Nv; ++i){
+        for (int j = 0; j < Nv; ++j){
+            for (int k = 0; k < Nv; ++k){
+                f[IDX(i,j,k,Nv,Nv)] = f_in[IDX(i,j,k,Nv,Nv)];
+            }
+        }
+    }
+    
     // Transform f to get f_hat
     fftw_execute(fft_f);
-
+   
     for (int r = 0; r < Nr; ++r){
         for (int s = 0; s < Ns; ++s){
 
@@ -115,10 +131,8 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
                         std::complex<double> alpha1 = std::exp(std::complex<double>(0,-(pi/(2*L))*nodes_gl[r]*l_dot_sigma));
                         std::complex<double> alpha2 = std::conj(alpha1);
 
-                        // We normalize the transforms here before taking the ifft
-                        double norm_fft = 1/(Nv*Nv*Nv);
-                        alpha1_times_f_hat[idx] = norm_fft*alpha1*f_hat[idx];
-                        alpha2_times_f_hat[idx] = norm_fft*alpha2*f_hat[idx];
+                        alpha1_times_f_hat[idx] = fft_scale*alpha1*f_hat[idx];
+                        alpha2_times_f_hat[idx] = fft_scale*alpha2*f_hat[idx];
                     
                         beta1[idx] = 4*pi*b_gamma*sincc(pi*nodes_gl[r]*norm_l/(2*L));
 
@@ -152,8 +166,7 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
                     for (int k = 0; k < Nv; ++k){
 
                         int idx = IDX(i,j,k,Nv,Nv);
-                        double norm_fft = 1/(Nv*Nv*Nv);
-                        Q_gain_hat[idx] += norm_fft*wts_gl[r]*wts_sph[s]*std::pow(nodes_gl[r],gamma+2)*beta1[idx]*transform_prod_hat[idx];
+                        Q_gain_hat[idx] += fft_scale*wts_gl[r]*wts_sph[s]*std::pow(nodes_gl[r],gamma+2)*beta1[idx]*transform_prod_hat[idx];
 
                     }
                 }
@@ -181,8 +194,7 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
             for (int k = 0; k < Nv; ++k){
 
                 int idx = IDX(i,j,k,Nv,Nv);
-                double norm_fft = 1/(Nv*Nv*Nv);
-                beta2_times_f_hat[idx] = norm_fft*beta2[idx]*f_hat[idx];
+                beta2_times_f_hat[idx] = fft_scale*beta2[idx]*f_hat[idx];
 
             }
         }
@@ -194,7 +206,7 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
 
     // Transform beta2_times_f_hat back to physical space
     // This also needs to be normalized
-    fftw_execute(ifft_Q_loss_hat);
+    fftw_execute(ifft_beta2_times_f_hat);
 
     // Compute the final form for Q = real(Q_gain - Q_loss)
     for (int i = 0; i < Nv; ++i){
@@ -204,7 +216,7 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
                 int idx = IDX(i,j,k,Nv,Nv);
                 std::complex<double> Q_loss_ijk = beta2_times_f[idx]*f[idx];
                 Q[idx] = Q_gain[idx].real() - Q_loss_ijk.real();
-
+                
             }
         }
     }
@@ -215,7 +227,7 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     fftw_destroy_plan(ifft_alpha2_times_f_hat);
     fftw_destroy_plan(fft_product);
     fftw_destroy_plan(ifft_Q_gain_hat);
-    fftw_destroy_plan(ifft_Q_loss_hat);
+    fftw_destroy_plan(ifft_beta2_times_f_hat);
 
     return;
 }

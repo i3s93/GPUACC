@@ -16,9 +16,6 @@
 #include "Utilities/gauss_legendre.hpp"
 #include "Collisions/boltzmann_collisions.hpp"
 
-// Map from tuple to index assuming Nv points are used in each dimension using row-major ordering
-#define IDX(i1, i2, i3, N1, N2) ((i1*N1+i2)*N2 + i3)
-
 int main(int argc, char** argv) {
 
     int Nv, Ns, trials;
@@ -87,17 +84,17 @@ int main(int argc, char** argv) {
         for (int j = 0; j < Nv; ++j){
             for (int k = 0; k < Nv; ++k){
 
-                // Compute r^2 = vx^2 + vy^2 + vz^2
+                int idx = IDX(i, j, k, Nv, Nv);
                 double r_sq = std::pow(vx[i],2) + std::pow(vy[j],2) + std::pow(vz[k],2);
                 
                 // Compute the BKW solution
-                f_bkw[IDX(i, j, k, Nv, Nv)] = std::exp(-(r_sq)/(2*K))*((5*K-3)/K+(1-K)/(std::pow(K,2))*(r_sq));
-                f_bkw[IDX(i, j, k, Nv, Nv)] *= 1/(2*std::pow(2*pi*K, 1.5));
+                f_bkw[idx] = std::exp(-(r_sq)/(2*K))*((5*K-3)/K+(1-K)/(std::pow(K,2))*(r_sq));
+                f_bkw[idx] *= 1/(2*std::pow(2*pi*K, 1.5));
 
                 // Compute the derivative of f
-                Q_bkw[IDX(i, j, k, Nv, Nv)] = (-3/(2*K) + r_sq/(2*std::pow(K,2)))*f_bkw[IDX(i, j, k, Nv, Nv)];
-                Q_bkw[IDX(i, j, k, Nv, Nv)] += 1/(2*std::pow(2*pi*K, 1.5))*std::exp(-r_sq/(2*K))*(3/(std::pow(K,2)) + (K-2)/(std::pow(K,3))*r_sq);
-                Q_bkw[IDX(i, j, k, Nv, Nv)] *= dK;
+                Q_bkw[idx] = (-3/(2*K) + r_sq/(2*std::pow(K,2)))*f_bkw[idx];
+                Q_bkw[idx] += 1/(2*std::pow(2*pi*K, 1.5))*std::exp(-r_sq/(2*K))*(3/(std::pow(K,2)) + (K-2)/(std::pow(K,3))*r_sq);
+                Q_bkw[idx] *= dK;
 
             }
         }
@@ -105,7 +102,7 @@ int main(int argc, char** argv) {
 
     // Compute the quadrature rules and store their information in the solver
     SolverManager sm;
-    get_gauss_legendre_rule(sp.Nr, sm.nodes_gl, sm.wts_gl, 0, sp.R);
+    get_gauss_legendre_rule(sp.Nr, sm.wts_gl, sm.nodes_gl, 0, sp.R);
 
     /*
     // Print out the GL nodes and weights
@@ -120,8 +117,11 @@ int main(int argc, char** argv) {
     sm.sigma3_sph = sd.z;
     sm.wts_sph = std::vector<double>(sp.Ns, (4*pi)/sp.Ns);
 
+    //std::cout << "Spherical design weights: " << (4*pi)/sp.Ns << "\n";
+
+
     // Check the quadrature for errors
-    // print_spherical_design(sd);
+    //print_spherical_design(sd);
 
     // Precompute and store the wave numbers for the transform as a tensor product
     std::vector<int> l;
@@ -152,9 +152,9 @@ int main(int argc, char** argv) {
     for (int j = 0; j < Nv; ++j){
         std::cout << "Q_bkw(15,j,15) at j = " << j << ": " << Q_bkw[IDX(15, j, 15, Nv, Nv)] << "\n"; 
     }
-  
 
     */
+
 
     sm.l1 = l;
     sm.l2 = l;
@@ -213,6 +213,8 @@ int main(int argc, char** argv) {
     std::cout << "L1 error: " << err_L1 << "\n";
     std::cout << "L2 error: " << err_L2 << "\n";
     std::cout << "Linf error: " << err_Linf << "\n\n";
-    
+  
+
+  
     return 0;
 }
