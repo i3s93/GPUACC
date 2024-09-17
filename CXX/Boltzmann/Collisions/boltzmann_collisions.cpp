@@ -12,18 +12,18 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     double L = sp.L;
 
     // Unpack the quadrature data
-    std::vector<double> wts_gl = sm.wts_gl;
-    std::vector<double> nodes_gl = sm.nodes_gl;
+    const std::vector<double>& wts_gl = sm.wts_gl;
+    const std::vector<double>& nodes_gl = sm.nodes_gl;
 
-    std::vector<double> wts_sph = sm.wts_sph;
-    std::vector<double> sigma1 = sm.sigma1_sph;
-    std::vector<double> sigma2 = sm.sigma2_sph;
-    std::vector<double> sigma3 = sm.sigma3_sph;
+    const std::vector<double>& wts_sph = sm.wts_sph;
+    const std::vector<double>& sigma1 = sm.sigma1_sph;
+    const std::vector<double>& sigma2 = sm.sigma2_sph;
+    const std::vector<double>& sigma3 = sm.sigma3_sph;
 
     // Extract the wave number vectors
-    std::vector<int> l1 = sm.l1;
-    std::vector<int> l2 = sm.l2;
-    std::vector<int> l3 = sm.l3;
+    const std::vector<int>& l1 = sm.l1;
+    const std::vector<int>& l2 = sm.l2;
+    const std::vector<int>& l3 = sm.l3;
 
     // Temporary for weights used to compute the loss term
     int grid_size = Nv*Nv*Nv;
@@ -64,7 +64,7 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
         }
     }
 
-    std::string fname("fftw_wisdom.dat");
+    std::string fname("wisdom.dat");
 
     if(fftw_import_wisdom_from_filename(fname.c_str()) == 0){
         std::cout << "Failed to import wisdom from file: " << fname << "\n";
@@ -74,32 +74,32 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     fftw_plan fft_f = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                        reinterpret_cast<fftw_complex*>(f.data()), 
                                        reinterpret_cast<fftw_complex*>(f_hat.data()),
-                                       FFTW_FORWARD, FFTW_ESTIMATE);
+                                       FFTW_FORWARD, FFTW_PATIENT);
 
     fftw_plan ifft_alpha1_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                                         reinterpret_cast<fftw_complex*>(alpha1_times_f_hat.data()), 
                                                         reinterpret_cast<fftw_complex*>(alpha1_times_f.data()),
-                                                        FFTW_BACKWARD, FFTW_ESTIMATE);
+                                                        FFTW_BACKWARD, FFTW_PATIENT);
 
     fftw_plan ifft_alpha2_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                                         reinterpret_cast<fftw_complex*>(alpha2_times_f_hat.data()), 
                                                         reinterpret_cast<fftw_complex*>(alpha2_times_f.data()),
-                                                        FFTW_BACKWARD, FFTW_ESTIMATE);
+                                                        FFTW_BACKWARD, FFTW_PATIENT);
 
     fftw_plan fft_product = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                             reinterpret_cast<fftw_complex*>(transform_prod.data()), 
                                             reinterpret_cast<fftw_complex*>(transform_prod_hat.data()),
-                                            FFTW_FORWARD, FFTW_ESTIMATE);
+                                            FFTW_FORWARD, FFTW_PATIENT);
 
     fftw_plan ifft_Q_gain_hat = fftw_plan_dft_3d(Nv, Nv, Nv,
                                                 reinterpret_cast<fftw_complex*>(Q_gain_hat.data()),
                                                 reinterpret_cast<fftw_complex*>(Q_gain.data()),
-                                                FFTW_BACKWARD, FFTW_ESTIMATE);
+                                                FFTW_BACKWARD, FFTW_PATIENT);
 
     fftw_plan ifft_beta2_times_f_hat = fftw_plan_dft_3d(Nv, Nv, Nv, 
                                                 reinterpret_cast<fftw_complex*>(beta2_times_f_hat.data()), 
                                                 reinterpret_cast<fftw_complex*>(beta2_times_f.data()),
-                                                FFTW_BACKWARD, FFTW_ESTIMATE);
+                                                FFTW_BACKWARD, FFTW_PATIENT);
 
     // Export wisdom immediately after plan creation
     fftw_export_wisdom_to_filename(fname.c_str());    
