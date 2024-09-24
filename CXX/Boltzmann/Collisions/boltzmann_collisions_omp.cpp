@@ -1,9 +1,13 @@
-#include "boltzmann_collisions.hpp"
+#include "boltzmann_collisions_omp.hpp"
 
-void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
-                                   std::vector<double> &f_in,
-                                   const SolverManager &sm, const SolverParameters &sp,
-                                   const double b_gamma, const double gamma){
+void boltzmann_vhs_spectral_solver_omp(std::vector<double> &Q,
+                                       std::vector<double> &f_in,
+                                       const SolverManager &sm, const SolverParameters &sp,
+                                       const double b_gamma, const double gamma){
+
+    // Initialize the threading environment and set the number of threads to be used in the planning phase
+    fftw_init_threads();
+    fftw_plan_with_nthreads(omp_get_num_threads());
 
     // Unpack the parameters for the evaluation
     int Nv = sp.Nv;
@@ -93,15 +97,19 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
                                                         FFTW_BACKWARD, FFTW_EXHAUSTIVE); 
 
     // Export wisdom immediately after plan creation
-    fftw_export_wisdom_to_filename(fname.c_str());    
+    fftw_export_wisdom_to_filename(fname.c_str());
 
-    // Initialize the input as a complex array
-    for (int idx = 0; idx < grid_size; ++idx){
-
-        f[idx] = f_in[idx];
-        Q_gain_hat[idx] = 0;
-        beta2[idx] = 0;
-
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < Nv; ++i){
+        for (int j = 0; j < Nv; ++j){
+            #pragma omp simd
+            for (int k = 0; k < Nv; ++k){
+                int idx = IDX(i,j,k,Nv,Nv,Nv);    
+                f[idx] = f_in[idx];
+                Q_gain_hat[idx] = 0;
+                beta2[idx] = 0;
+            }
+        }
     }
     
     // Transform f to get f_hat
@@ -111,10 +119,11 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
         for (int s = 0; s < Ns; ++s){
 
             // Compute the complex weights alpha1 and alpha2 to scale the gain term
+            #pragma omp parallel for collapse(2)
             for (int i = 0; i < Nv; ++i){
                 for (int j = 0; j < Nv; ++j){
+                    #pragma omp simd
                     for (int k = 0; k < Nv; ++k){
-
                         int idx = IDX(i,j,k,Nv,Nv,Nv);
                         double l_dot_sigma = l1[i]*sigma1[s] + l2[j]*sigma2[s] + l3[k]*sigma3[s];
                         double norm_l = std::sqrt(l1[i]*l1[i] + l2[j]*l2[j] + l3[k]*l3[k]);
@@ -126,7 +135,6 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
                         alpha2_times_f_hat[idx] = fft_scale*alpha2*f_hat[idx];
                     
                         beta1[idx] = 4*pi*b_gamma*sincc(pi*nodes_gl[r]*norm_l/(2*L));
-
                     }
                 }
             }
@@ -136,34 +144,46 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
             fftw_execute(ifft_alpha2_times_f_hat);
 
             // Compute the product of the transforms in physical space
-            for (int idx = 0; idx < grid_size; ++idx){
-
-                transform_prod[idx] = alpha1_times_f[idx]*alpha2_times_f[idx];
-
+            #pragma omp parallel for collapse(2)
+            for (int i = 0; i < Nv; ++i){
+                for (int j = 0; j < Nv; ++j){
+                    #pragma omp simd
+                    for (int k = 0; k < Nv; ++k){
+                        int idx = IDX(i,j,k,Nv,Nv,Nv);
+                        transform_prod[idx] = alpha1_times_f[idx]*alpha2_times_f[idx];
+                    }
+                }
             }
 
             // Transform the product back to the frequency domain
             fftw_execute(fft_product);
 
             // Update the gain term in the frequency domain
-            // Each term that is added is normalized 
-            for (int idx = 0; idx < grid_size; ++idx){
-
-                Q_gain_hat[idx] += fft_scale*wts_gl[r]*wts_sph[s]*std::pow(nodes_gl[r],gamma+2)*beta1[idx]*transform_prod_hat[idx];
-
+            // Each term that is added is normalized
+            // Note: Since the quadrature loops are done in serial, there is no need for a reduction clause
+            #pragma omp parallel for collapse(2)
+            for (int i = 0; i < Nv; ++i){
+                for (int j = 0; j < Nv; ++j){
+                    #pragma omp simd
+                    for (int k = 0; k < Nv; ++k){
+                        int idx = IDX(i,j,k,Nv,Nv,Nv);
+                        Q_gain_hat[idx] += fft_scale*wts_gl[r]*wts_sph[s]*std::pow(nodes_gl[r],gamma+2)*beta1[idx]*transform_prod_hat[idx];
+                    }
+                }
             }
 
         } // End of spherical loop
 
         // Compute the complex weights beta2
+        // Note: Since the quadrature loops are done in serial, there is no need for a reduction clause
+        #pragma omp parallel for collapse(2)
         for (int i = 0; i < Nv; ++i){
             for (int j = 0; j < Nv; ++j){
+                #pragma omp simd
                 for (int k = 0; k < Nv; ++k){
-
                     int idx = IDX(i,j,k,Nv,Nv,Nv);
                     double norm_l = std::sqrt(l1[i]*l1[i] + l2[j]*l2[j] + l3[k]*l3[k]);
                     beta2[idx] += 16*pi*pi*b_gamma*wts_gl[r]*std::pow(nodes_gl[r], gamma+2)*sincc(pi*nodes_gl[r]*norm_l/L);
-
                 }
             }
         }
@@ -171,10 +191,15 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     } // End of radial loop
 
     // Apply weights beta2 to f_hat and normalize
-    for (int idx = 0; idx < grid_size; ++idx){
-
-        beta2_times_f_hat[idx] = fft_scale*beta2[idx]*f_hat[idx];
-
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < Nv; ++i){
+        for (int j = 0; j < Nv; ++j){
+            #pragma omp simd
+            for (int k = 0; k < Nv; ++k){
+                int idx = IDX(i,j,k,Nv,Nv,Nv);
+                beta2_times_f_hat[idx] = fft_scale*beta2[idx]*f_hat[idx];
+            }
+        }
     }
 
     // Transform Q_gain back to physical space
@@ -186,10 +211,16 @@ void boltzmann_vhs_spectral_solver(std::vector<double> &Q,
     fftw_execute(ifft_beta2_times_f_hat);
 
     // Compute the final form for Q = real(Q_gain - Q_loss)
-    for (int idx = 0; idx < grid_size; ++idx){
-
-        std::complex<double> Q_loss_ijk = beta2_times_f[idx]*f[idx];
-        Q[idx] = Q_gain[idx].real() - Q_loss_ijk.real();            
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < Nv; ++i){
+        for (int j = 0; j < Nv; ++j){
+            #pragma omp simd
+            for (int k = 0; k < Nv; ++k){
+                int idx = IDX(i,j,k,Nv,Nv,Nv);
+                std::complex<double> Q_loss_ijk = beta2_times_f[idx]*f[idx];
+                Q[idx] = Q_gain[idx].real() - Q_loss_ijk.real();
+            }
+        }            
     }
 
     // Destory the plans for each of the transforms

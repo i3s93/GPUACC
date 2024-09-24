@@ -41,11 +41,12 @@ option(CMAKE_C_EXTENSIONS    "Enable/disable extensions, e.g. -std=gnu11 vs. -st
 option(CMAKE_CXX_EXTENSIONS  "Enable/disable extensions, e.g. -std=gnu++11 vs. -std=c++11" OFF)
 option(CMAKE_CUDA_EXTENSIONS "Enable/disable extensions" OFF)
 
-set(CMAKE_C_FLAGS    "-O3 -fopenmp -ffast-math")
-set(CMAKE_CXX_FLAGS  "-O3 -fopenmp -faligned-new -ffast-math")
+set(CMAKE_C_FLAGS    "-O3 -ffast-math -fopenmp")
+set(CMAKE_CXX_FLAGS  "-O3 -faligned-new -ffast-math -fopenmp")
 
 # Create the executable targets for the different codes
 add_executable(maxwell_bkw_serial_ex maxwell_bkw_serial.cpp)
+add_executable(maxwell_bkw_omp_ex maxwell_bkw_omp.cpp)
 
 # Create interface target with compiler flags
 add_library(Boltzmann)
@@ -55,8 +56,11 @@ add_subdirectory(Collisions)
 
 # Specify the location of the header files for the argument parser
 target_include_directories(maxwell_bkw_serial_ex PRIVATE Include)
+target_include_directories(maxwell_bkw_omp_ex PRIVATE Include)
 
 # Link the libraries to the code
 # Cray compilers automatically provide the link commands to fftw3 and other math libraries
-target_link_libraries(maxwell_bkw_serial_ex PRIVATE Boltzmann OpenMP::OpenMP_CXX)
+target_link_libraries(maxwell_bkw_serial_ex PRIVATE Boltzmann OpenMP::OpenMP_C OpenMP::OpenMP_CXX)
+target_link_libraries(maxwell_bkw_omp_ex PRIVATE Boltzmann OpenMP::OpenMP_C OpenMP::OpenMP_CXX)
+
 

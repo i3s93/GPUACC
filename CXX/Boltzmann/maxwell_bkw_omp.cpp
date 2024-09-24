@@ -14,7 +14,7 @@
 #include "Utilities/statistics.hpp"
 #include "Utilities/Solver_Manager.hpp"
 #include "Utilities/gauss_legendre.hpp"
-#include "Collisions/boltzmann_collisions_serial.hpp"
+#include "Collisions/boltzmann_collisions_omp.hpp"
 
 int main(int argc, char** argv) {
 
@@ -81,8 +81,10 @@ int main(int argc, char** argv) {
     std::vector<double> f_bkw(grid_size,0);
     std::vector<double> Q_bkw(grid_size,0);
 
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < Nv; ++i){
         for (int j = 0; j < Nv; ++j){
+            #pragma omp simd
             for (int k = 0; k < Nv; ++k){
 
                 int idx = IDX(i,j,k,Nv,Nv,Nv);
@@ -140,7 +142,7 @@ int main(int argc, char** argv) {
 
         double start_time = omp_get_wtime();
         
-        boltzmann_vhs_spectral_solver(Q, f_bkw, sm, sp, b_gamma, gamma); 
+        boltzmann_vhs_spectral_solver_omp(Q, f_bkw, sm, sp, b_gamma, gamma); 
 
         double end_time = omp_get_wtime();
 
@@ -160,6 +162,7 @@ int main(int argc, char** argv) {
     double err_Linf = 0;
     double abs_diff;
 
+    #pragma omp parallel for reduction(+:err_L1,err_L2) reduction(max:err_Linf)
     for (int idx = 0; idx < grid_size; ++idx){
         abs_diff = std::abs(Q[idx] - Q_bkw[idx]);
         err_L1 += abs_diff;
