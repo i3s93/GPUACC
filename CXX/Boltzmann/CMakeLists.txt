@@ -42,7 +42,7 @@ option(CMAKE_CXX_EXTENSIONS  "Enable/disable extensions, e.g. -std=gnu++11 vs. -
 option(CMAKE_CUDA_EXTENSIONS "Enable/disable extensions" OFF)
 
 set(CMAKE_C_FLAGS    "-O3 -fopenmp -ffast-math")
-set(CMAKE_CXX_FLAGS  "-O3 -fopenmp -ffast-math -faligned-new")
+set(CMAKE_CXX_FLAGS  "-O3 -fopenmp -faligned-new -ffast-math")
 
 # Create the executable targets for the different codes
 add_executable(maxwell_bkw_serial_ex maxwell_bkw_serial.cpp)

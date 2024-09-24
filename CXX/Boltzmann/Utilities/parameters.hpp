@@ -2,7 +2,7 @@
 #define PARAMETERS_HPP
 
 // Map from tuple to index assuming Nv points are used in each dimension using row-major ordering
-#define IDX(i1, i2, i3, N1, N2) ((i1*N1+i2)*N2 + i3)
+#define IDX(i1, i2, i3, N1, N2, N3) ((i1*N2+i2)*N3 + i3)
 
 constexpr double pi = 3.14159265358979323846;
 

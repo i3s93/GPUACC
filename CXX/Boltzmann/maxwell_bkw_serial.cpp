@@ -77,15 +77,16 @@ int main(int argc, char** argv) {
     const double K = 1 - std::exp(-t/6);
     const double dK = std::exp(-t/6)/6;
 
-    std::vector<double> f_bkw(Nv*Nv*Nv,0);
-    std::vector<double> Q_bkw(Nv*Nv*Nv,0);
+    int grid_size = Nv*Nv*Nv;    
+    std::vector<double> f_bkw(grid_size,0);
+    std::vector<double> Q_bkw(grid_size,0);
 
     for (int i = 0; i < Nv; ++i){
         for (int j = 0; j < Nv; ++j){
             for (int k = 0; k < Nv; ++k){
 
-                int idx = IDX(i, j, k, Nv, Nv);
-                double r_sq = std::pow(vx[i],2) + std::pow(vy[j],2) + std::pow(vz[k],2);
+                int idx = IDX(i,j,k,Nv,Nv,Nv);
+                double r_sq = vx[i]*vx[i] + vy[j]*vy[j] + vz[k]*vz[k];
                 
                 // Compute the BKW solution
                 f_bkw[idx] = std::exp(-(r_sq)/(2*K))*((5*K-3)/K+(1-K)/(std::pow(K,2))*(r_sq));
@@ -103,25 +104,12 @@ int main(int argc, char** argv) {
     // Compute the quadrature rules and store their information in the solver
     SolverManager sm;
     get_gauss_legendre_rule(sp.Nr, sm.wts_gl, sm.nodes_gl, 0, sp.R);
-
-    /*
-    // Print out the GL nodes and weights
-    for (int i = 0; i < sp.Nr; ++i){
-        std::cout << "(wts, nodes) = (" << sm.wts_gl[i] << ", " << sm.nodes_gl[i]  << ")\n";
-    }
-    */
-
+    
     SphericalDesign sd = get_spherical_design(Ns);
     sm.sigma1_sph = sd.x;
     sm.sigma2_sph = sd.y;
     sm.sigma3_sph = sd.z;
     sm.wts_sph = std::vector<double>(sp.Ns, (4*pi)/sp.Ns);
-
-    //std::cout << "Spherical design weights: " << (4*pi)/sp.Ns << "\n";
-
-
-    // Check the quadrature for errors
-    //print_spherical_design(sd);
 
     // Precompute and store the wave numbers for the transform as a tensor product
     std::vector<int> l;
@@ -129,39 +117,20 @@ int main(int argc, char** argv) {
     
     // First half: 0 to N/2 - 1
     for (int i = 0; i < Nv/2; ++i){
-        // std::cout << i << "\n";
         l.push_back(i);
     }
 
     // Second half: -N/2 to -1  
     for (int i = -Nv/2; i < 0; ++i){
-        // std::cout << i << "\n";
         l.push_back(i);
     }
-
-    /*
-    std::cout << "\n";
-
-    // Check a slices of the input
-    for (int j = 0; j < Nv; ++j){
-        std::cout << "f_bkw(15,j,15) at j = " << j << ": " << f_bkw[IDX(15, j, 15, Nv, Nv)] << "\n"; 
-    }
-
-    std::cout << "\n\n";
-
-    for (int j = 0; j < Nv; ++j){
-        std::cout << "Q_bkw(15,j,15) at j = " << j << ": " << Q_bkw[IDX(15, j, 15, Nv, Nv)] << "\n"; 
-    }
-
-    */
-
 
     sm.l1 = l;
     sm.l2 = l;
     sm.l3 = l;
-
+     
     // Allocate space for the collision operator computed from the Boltzmann operator
-    std::vector<double> Q(Nv*Nv*Nv,0);
+    std::vector<double> Q(grid_size,0);
 
     // Container to hold the run data CPU
     std::vector<double> run_times;
@@ -191,30 +160,23 @@ int main(int argc, char** argv) {
     double err_Linf = 0;
     double abs_diff;
 
-    for (int i = 0; i < Nv; ++i){
-        for (int j = 0; j < Nv; ++j){
-            for (int k = 0; k < Nv; ++k){
-
-                abs_diff = std::abs(Q[IDX(i, j, k, Nv, Nv)] - Q_bkw[IDX(i, j, k, Nv, Nv)]);
-                err_L1 += abs_diff;
-                err_L2 += std::pow(abs_diff,2);
-                err_Linf = std::max(err_Linf, abs_diff);
-
-            }
-        }
+    for (int idx = 0; idx < grid_size; ++idx){
+        abs_diff = std::abs(Q[idx] - Q_bkw[idx]);
+        err_L1 += abs_diff;
+        err_L2 += abs_diff*abs_diff;
+        err_Linf = std::max(err_Linf, abs_diff);
     }
 
     // L1 and L2 errors need to be further modified
-    err_L1 *= std::pow(dv,3);
-    err_L2 *= std::pow(dv,3);
+    double dv3 = dv*dv*dv;
+    err_L1 *= dv3;
+    err_L2 *= dv3;
     err_L2 = std::sqrt(err_L2);
 
     std::cout << "Approximation errors:\n";
     std::cout << "L1 error: " << err_L1 << "\n";
     std::cout << "L2 error: " << err_L2 << "\n";
     std::cout << "Linf error: " << err_Linf << "\n\n";
-  
-
   
     return 0;
 }
