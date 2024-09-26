@@ -12,6 +12,11 @@
 #include "../Utilities/parameters.hpp"
 #include "../Utilities/sincc.hpp"
 
+void precompute_weights_omp(SolverManager &sm, SolverParameters &sp,
+                        const double b_gamma, const double gamma);
+
+void precompute_release_omp(SolverManager &sm);
+
 void boltzmann_vhs_spectral_solver_omp(std::vector<double> &Q, 
                                    std::vector<double> &f_in, 
                                    const SolverManager &sm, const SolverParameters &sp, 

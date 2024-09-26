@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
             #pragma omp simd
             for (int k = 0; k < Nv; ++k){
 
-                int idx = IDX(i,j,k,Nv,Nv,Nv);
+                int idx = IDX3(i,j,k,Nv,Nv,Nv);
                 double r_sq = vx[i]*vx[i] + vy[j]*vy[j] + vz[k]*vz[k];
                 
                 // Compute the BKW solution
@@ -130,6 +130,9 @@ int main(int argc, char** argv) {
     sm.l1 = l;
     sm.l2 = l;
     sm.l3 = l;
+
+    // Precompute any transform weights
+    precompute_weights_omp(sm, sp, b_gamma, gamma);
      
     // Allocate space for the collision operator computed from the Boltzmann operator
     std::vector<double> Q(grid_size,0);
@@ -180,6 +183,9 @@ int main(int argc, char** argv) {
     std::cout << "L1 error: " << err_L1 << "\n";
     std::cout << "L2 error: " << err_L2 << "\n";
     std::cout << "Linf error: " << err_Linf << "\n\n";
+
+    // Release the memory allocated during the precomputation phase
+    precompute_release_omp(sm);
   
     return 0;
 }
