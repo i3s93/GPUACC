@@ -1,8 +1,11 @@
 #ifndef PARAMETERS_HPP
 #define PARAMETERS_HPP
 
-// Map from tuple to index assuming Nv points are used in each dimension using row-major ordering
-#define IDX(i1, i2, i3, N1, N2, N3) ((i1*N2+i2)*N3 + i3)
+// Maps from a tuple to linear index assuming a row-major ordering
+#define IDX2(i1, i2, N1, N2) (i1*N2 + i2)
+#define IDX3(i1, i2, i3, N1, N2, N3) ((i1*N2+i2)*N3 + i3)
+#define IDX4(i1, i2, i3, i4, N1, N2, N3, N4) (((i1*N2 + i2)*N3 + i3)*N4 + i4)
+#define IDX5(i1, i2, i3, i4, i5, N1, N2, N3, N4, N5) ((((i1*N2 + i2)*N3 + i3)*N4 + i4)*N5 + i5)
 
 constexpr double pi = 3.14159265358979323846;
 

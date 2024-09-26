@@ -2,6 +2,7 @@
 #define SOLVER_MANAGER_HPP
 
 #include <vector>
+#include <complex>
 
 struct SolverManager
 {
@@ -19,6 +20,12 @@ struct SolverManager
     std::vector<double> sigma1_sph;
     std::vector<double> sigma2_sph;
     std::vector<double> sigma3_sph;
+
+    // Precomputed weights for transform data
+    std::complex<double>* alpha1;
+    double* beta1;
+    double* beta2;
+
 };
 
 
